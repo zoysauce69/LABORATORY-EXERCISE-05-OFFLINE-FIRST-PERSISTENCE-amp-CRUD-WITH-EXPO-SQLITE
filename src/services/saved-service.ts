@@ -15,11 +15,12 @@ import {
 export const savedPropertyService = {
   async list(userId: string): Promise<Result<PropertySearchResult[]>> {
     if (DEMO_MODE) {
+      const { DEMO_PROPERTIES } = await import('@/lib/demo-data');
       const saved = await getSavedProperties();
       const userSaved = saved.filter((s) => s.user_id === userId);
-      // In DEMO_MODE, we can't fetch full property details easily, so return empty array
-      // The UI will need to handle this differently or we need to match against DEMO_PROPERTIES
-      return ok([]);
+      const savedIds = new Set(userSaved.map((s) => s.property_id));
+      const properties = DEMO_PROPERTIES.filter((p) => savedIds.has(p.id));
+      return ok(properties);
     }
 
     const ids = await runQuery('Load saved listings', () =>
@@ -118,10 +119,12 @@ export const savedPropertyService = {
 export const savedRoommateService = {
   async list(userId: string): Promise<Result<RoommateMatchResult[]>> {
     if (DEMO_MODE) {
+      const { DEMO_ROOMMATES } = await import('@/lib/demo-data');
       const saved = await getSavedRoommates();
       const userSaved = saved.filter((s) => s.user_id === userId);
-      // Return empty array; roommate matching would need full implementation
-      return ok([]);
+      const savedIds = new Set(userSaved.map((s) => s.roommate_profile_id));
+      const roommates = DEMO_ROOMMATES.filter((r) => savedIds.has(r.roommate_profile_id));
+      return ok(roommates);
     }
     const ids = await runQuery('Load saved roommates', () =>
       supabase.from('saved_roommate_profiles').select('roommate_profile_id'),

@@ -1,5 +1,5 @@
-import { useCallback } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useRouter } from 'expo-router';
 
@@ -28,6 +28,7 @@ import { useAsyncData } from '@/hooks/use-async-data';
 import { ok } from '@/lib/errors';
 import { profileService } from '@/services/profile-service';
 import { authService } from '@/services/auth-service';
+import { roommateService } from '@/services/roommate-service';
 import { verificationSummary } from '@/constants/options';
 import type { UserRole } from '@/lib/database.types';
 import { colors, spacing } from '@/theme';
@@ -49,6 +50,8 @@ export function ProfilePanel({ role }: ProfilePanelProps) {
 
   const isLandlord = role === 'landlord';
 
+  const [isSendingRequest, setIsSendingRequest] = useState(false);
+
   const togglePreference = useCallback(
     async (key: NotificationPreferenceKey, next: boolean) => {
       const targetId = profile?.id ?? user?.id;
@@ -62,6 +65,23 @@ export function ProfilePanel({ role }: ProfilePanelProps) {
     },
     [profile?.id, refreshProfile, user?.id],
   );
+
+  const sendRoommateRequest = useCallback(async () => {
+    if (!user?.id) {
+      Alert.alert('Error', 'Please sign in to send a roommate request.');
+      return;
+    }
+
+    setIsSendingRequest(true);
+    const result = await roommateService.sendRequest(user.id, 'demo-user-alex');
+    setIsSendingRequest(false);
+
+    if (result.ok) {
+      Alert.alert('Success', 'Your roommate request to Alex Reyes has been sent!');
+    } else {
+      Alert.alert('Error', result.error.message);
+    }
+  }, [user?.id]);
 
   // `city` lives in the private details table rather than on the public profile
   // row, so the location badge reads it from the signed-in user's own record.
@@ -207,7 +227,8 @@ export function ProfilePanel({ role }: ProfilePanelProps) {
                 <AccountRow
                   label="Send roommate request"
                   icon="paper-plane-outline"
-                  onPress={() => router.push('/(student)/roommate/demo-user-alex')}
+                  onPress={() => void sendRoommateRequest()}
+                  disabled={isSendingRequest}
                 />
               </View>
             </Card>
