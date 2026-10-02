@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "RoomLink",
+    "slug": "roomlink",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "roomlink",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#0F2554",
+      "resizeMode": "contain"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ph.roomlink.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "ph.roomlink.app",
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "RoomLink uses your photos so you can attach property photos to your listings.",
+          "cameraPermission": "RoomLink uses your camera so you can photograph the properties you list."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#1D4ED8"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

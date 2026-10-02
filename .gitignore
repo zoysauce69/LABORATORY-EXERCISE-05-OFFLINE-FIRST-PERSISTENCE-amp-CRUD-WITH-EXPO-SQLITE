@@ -1,0 +1,52 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# native
+/ios
+/android
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# metro
+.metro-health-check*
+
+# secrets and local env
+.env
+.env.local
+.env*.local
+!.env.example
+
+# supabase local artefacts
+supabase/.branches
+supabase/.temp
+supabase/.env
+
+# testing
+coverage/
+
+# logs
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.log
+
+# macOS
+.DS_Store
+
+# editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
