@@ -36,6 +36,7 @@ export const PH_CITIES: CityOption[] = [
   { label: 'Dumaguete', latitude: 9.306, longitude: 123.306 },
   { label: 'Iloilo City', latitude: 10.693, longitude: 122.567 },
   { label: 'Los Baños', latitude: 14.212, longitude: 121.165 },
+  { label: 'Mati City', latitude: 6.9517, longitude: 126.2158 },
 ];
 
 export const PH_BARANGAYS: Record<string, string[]> = {
@@ -78,6 +79,23 @@ export const PH_BARANGAYS: Record<string, string[]> = {
     'Talisay',
   ],
   'Davao City': ['Agdao', 'Bunawan', 'Matina', 'Poblacion', 'Toril', 'Tuday'],
+  'Mati City': [
+    'Badas',
+    'Bobon',
+    'Buso',
+    'Cabuayan',
+    'Dampil',
+    'General Luna',
+    'Guioa',
+    'Lamitan',
+    'Liong',
+    'Matiao',
+    'Mayo',
+    'Poblacion',
+    'Sanghay',
+    'Tagum',
+    'Tamastama',
+  ],
   Dumaguete: ['Arellano', 'Baptisan', 'Poblacion', 'San Jose', 'Sibulan'],
   'Iloilo City': [
     'Bolo',

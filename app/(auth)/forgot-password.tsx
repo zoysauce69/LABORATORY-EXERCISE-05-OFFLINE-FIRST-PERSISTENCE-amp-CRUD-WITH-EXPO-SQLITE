@@ -50,7 +50,7 @@ export default function ForgotPasswordScreen() {
     <AuthShell
       title="Reset your password"
       subtitle="Enter the email you signed up with and we will show you the code."
-      onBack={() => router.back()}
+      onBack={() => (router.canGoBack() ? router.back() : router.replace('/(auth)/sign-in'))}
       backLabel="Back to sign in"
     >
       {formError ? <InlineAlert tone="danger" message={formError} /> : null}

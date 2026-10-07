@@ -5,7 +5,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 
 import { DateField, SelectField, TextField } from '@/components/form-fields';
 import { ScreenHeader } from '@/components/screen-header';
-import { AppText, Button, InlineAlert, Screen, ScreenScroll } from '@/components/ui';
+import { ChipGroup, AppText, Button, InlineAlert, Screen, ScreenScroll } from '@/components/ui';
+import type { ChipOption } from '@/components/ui';
 import { PH_CITIES } from '@/constants/locations';
 import { useApp } from '@/hooks/use-app';
 import { toMessage } from '@/lib/errors';
@@ -29,6 +30,22 @@ interface FormValues {
 const CITY_OPTIONS = PH_CITIES.map((city) => ({ value: city.label, label: city.label }));
 
 /**
+ * Landmarks you tap instead of type — the same kinds of places the old
+ * placeholder used to ask for, plus a few common ones.
+ */
+const LANDMARK_OPTIONS: ChipOption<string>[] = [
+  { value: 'Shopping center', label: 'Shopping center' },
+  { value: 'School', label: 'School' },
+  { value: 'University', label: 'University' },
+  { value: 'Terminal', label: 'Terminal' },
+  { value: 'Market', label: 'Market' },
+  { value: 'Mall', label: 'Mall' },
+  { value: 'Hospital', label: 'Hospital' },
+  { value: 'Church', label: 'Church' },
+  { value: 'Park', label: 'Park' },
+];
+
+/**
  * Add or edit a room as a normal full-screen form.
  *
  * Submitted rooms are written to local storage and merged straight into the
@@ -42,6 +59,13 @@ export default function AddRoomScreen() {
 
   const existing = id ? customRooms.find((room) => room.id === id) : undefined;
   const isEditing = existing !== undefined;
+
+  // A room saved before this picker existed may carry a typed landmark; keep
+  // it as an option so editing never silently loses it.
+  const landmarkOptions: ChipOption<string>[] =
+    existing?.landmark && !LANDMARK_OPTIONS.some((option) => option.value === existing.landmark)
+      ? [...LANDMARK_OPTIONS, { value: existing.landmark, label: existing.landmark }]
+      : LANDMARK_OPTIONS;
 
   const [values, setValues] = useState<FormValues>(() => ({
     title: existing?.title ?? '',
@@ -73,7 +97,10 @@ export default function AddRoomScreen() {
       clearTimeout(closeTimer.current);
       closeTimer.current = null;
     }
-    router.back();
+    // Falls back to the tabs for direct URL loads, where there is no in-app
+    // stack to pop and router.back() would go nowhere.
+    if (router.canGoBack()) router.back();
+    else router.replace('/(app)/(tabs)');
   }
 
   function update<K extends keyof FormValues>(key: K, value: FormValues[K]) {
@@ -224,13 +251,12 @@ export default function AddRoomScreen() {
           autoCapitalize="words"
         />
 
-        <TextField
+        <ChipGroup
           label="Nearest landmark"
-          value={values.landmark}
-          onChangeText={(value) => update('landmark', value)}
-          placeholder="Shopping center, school, terminal"
-          error={errors.landmark}
-          autoCapitalize="words"
+          helperText="Tap the place closest to the room — no typing needed."
+          options={landmarkOptions}
+          selected={values.landmark ? [values.landmark] : []}
+          onToggle={(value) => update('landmark', values.landmark === value ? '' : value)}
         />
 
         <DateField

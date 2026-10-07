@@ -117,7 +117,13 @@ export default function EditProfileScreen() {
       return;
     }
 
-    router.back();
+    goBackToProfile();
+  }
+
+  /** Leaves the screen, falling back to the profile tab on a direct URL load. */
+  function goBackToProfile() {
+    if (router.canGoBack()) router.back();
+    else router.replace('/(app)/(tabs)/profile');
   }
 
   async function handleDiscard() {
@@ -135,7 +141,7 @@ export default function EditProfileScreen() {
       moveInDate: profile.moveInDate,
     });
     setIsDiscarding(false);
-    if (result.ok) router.back();
+    if (result.ok) goBackToProfile();
   }
 
   return (
