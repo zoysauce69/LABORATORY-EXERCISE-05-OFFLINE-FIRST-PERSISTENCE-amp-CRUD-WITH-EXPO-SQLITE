@@ -1,0 +1,9 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    "Saved properties list returns empty array in demo mode. savedPropertyService.list() returns [] instead of filtering DEMO_PROPERTIES by saved IDs. Users can save properties but cannot see them on the Saved screen. Match saved IDs against DEMO_PROPERTIES and return the hydrated results.",
+    "Saved roommates list returns empty array in demo mode. savedRoommateService.list() returns [] instead of filtering DEMO_ROOMMATES by saved IDs. Match saved IDs against DEMO_ROOMMATES and return the hydrated results.",
+    "Alex Reyes 'Send roommate request' action routes to the roommate detail screen instead of opening a request modal or navigating to a send-request screen. The profile panel routes both 'View profile' and 'Send roommate request' to /(student)/roommate/demo-user-alex. The send action should handle the request flow differently from the view action."
+  ],
+  "reviewDoc": "c:\\Users\\MACHENIKE r7\\OneDrive\\ドキュメント\\Default Project\\.agents\\tasks\\review-doc.md"
+}
