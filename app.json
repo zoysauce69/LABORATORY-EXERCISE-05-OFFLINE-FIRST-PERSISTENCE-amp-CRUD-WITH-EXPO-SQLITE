@@ -28,13 +28,7 @@
     },
     "plugins": [
       "expo-router",
-      "expo-sqlite",
-      [
-        "expo-image-picker",
-        {
-          "photosPermission": "RoomLink needs access to your photos so you can add pictures to a room listing."
-        }
-      ]
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": false

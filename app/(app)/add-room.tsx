@@ -1,27 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
-  useWindowDimensions,
-} from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
-import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
-import { SmartImage } from '@/components/image';
 import { DateField, SelectField, TextField } from '@/components/form-fields';
-import { AppText, Button, InlineAlert } from '@/components/ui';
+import { ScreenHeader } from '@/components/screen-header';
+import { AppText, Button, InlineAlert, Screen, ScreenScroll } from '@/components/ui';
 import { PH_CITIES } from '@/constants/locations';
 import { useApp } from '@/hooks/use-app';
 import { toMessage } from '@/lib/errors';
 import { ROOM_TYPE_OPTIONS } from '@/services/room-service';
 import { parsePesoInput } from '@/utils/format';
-import { colors, radii, spacing } from '@/theme';
+import { colors, spacing } from '@/theme';
 import type { Room, RoomType } from '@/lib/types';
 
 interface FormValues {
@@ -38,17 +28,12 @@ interface FormValues {
 
 const CITY_OPTIONS = PH_CITIES.map((city) => ({ value: city.label, label: city.label }));
 
-/** Photos a single room may carry, kept low so storage stays predictable. */
-const MAX_PHOTOS = 3;
-
 /**
- * Add or edit a room, presented as a floating sheet rather than a full screen.
+ * Add or edit a room as a normal full-screen form.
  *
- * The sheet is capped at a fraction of the viewport and scrolls internally,
- * with the actions pinned to its foot, so the form stays reachable on small
- * phones as well as large ones. Submitted rooms are written to local storage
- * and merged straight into the listings — no backend is involved. Editing
- * passes `?id=` with an existing custom room.
+ * Submitted rooms are written to local storage and merged straight into the
+ * listings — no backend is involved. Editing passes `?id=` with an existing
+ * custom room.
  */
 export default function AddRoomScreen() {
   const router = useRouter();
@@ -57,11 +42,6 @@ export default function AddRoomScreen() {
 
   const existing = id ? customRooms.find((room) => room.id === id) : undefined;
   const isEditing = existing !== undefined;
-
-  // The sheet is capped against the real viewport: a percentage height cannot
-  // be relied on inside every navigator container, especially on web.
-  const { height } = useWindowDimensions();
-  const sheetMaxHeight = Math.round(height * 0.92);
 
   const [values, setValues] = useState<FormValues>(() => ({
     title: existing?.title ?? '',
@@ -75,23 +55,14 @@ export default function AddRoomScreen() {
     description: existing?.description ?? '',
   }));
 
-  const [images, setImages] = useState<string[]>(() => existing?.images ?? []);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
-  const [photoNotice, setPhotoNotice] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  /**
-   * Guards the backdrop against the very touch that opened the sheet.
-   *
-   * Written in an effect because reading the clock during render is impure.
-   */
-  const openedAt = useRef<number | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    openedAt.current = Date.now();
     return () => {
       if (closeTimer.current) clearTimeout(closeTimer.current);
     };
@@ -105,12 +76,6 @@ export default function AddRoomScreen() {
     router.back();
   }
 
-  /** Backdrop close, ignored for the first beat after opening. */
-  function dismissFromBackdrop() {
-    if (openedAt.current === null || Date.now() - openedAt.current < 400) return;
-    dismiss();
-  }
-
   function update<K extends keyof FormValues>(key: K, value: FormValues[K]) {
     setValues((current) => ({ ...current, [key]: value }));
     setErrors((current) => {
@@ -119,40 +84,6 @@ export default function AddRoomScreen() {
       delete next[key];
       return next;
     });
-  }
-
-  async function pickPhotos() {
-    if (images.length >= MAX_PHOTOS) return;
-    setPhotoNotice(null);
-
-    try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        // Inline rather than Alert.alert, which does nothing on the web preview.
-        setPhotoNotice(
-          'Photo access is off. Allow it in your phone settings, then try adding a picture again.',
-        );
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsMultipleSelection: true,
-        selectionLimit: MAX_PHOTOS - images.length,
-        quality: 0.7,
-      });
-
-      if (result.canceled) return;
-
-      const picked = result.assets.map((asset) => asset.uri);
-      setImages((current) => [...new Set([...current, ...picked])].slice(0, MAX_PHOTOS));
-    } catch {
-      setPhotoNotice('We could not open your photo library. Please try again.');
-    }
-  }
-
-  function removePhoto(uri: string) {
-    setImages((current) => current.filter((item) => item !== uri));
   }
 
   function validate(): Record<string, string> {
@@ -205,7 +136,7 @@ export default function AddRoomScreen() {
         `${values.title.trim()} in ${values.barangay.trim()}, ${values.city}.`,
       amenities: existing?.amenities ?? [],
       houseRules: existing?.houseRules ?? [],
-      images,
+      images: existing?.images ?? [],
       landlord: existing?.landlord ?? {
         name: profile.fullName,
         verified: false,
@@ -226,314 +157,130 @@ export default function AddRoomScreen() {
       return;
     }
 
-    // Shown inside the sheet rather than through Alert, which is a no-op on web,
-    // then the sheet closes on its own so the message is seen either way.
+    // Shown inline rather than through Alert, which is a no-op on web, then the
+    // screen returns on its own so the message is seen either way.
     setSavedMessage(isEditing ? 'Room updated successfully!' : 'Room added successfully!');
     closeTimer.current = setTimeout(dismiss, 900);
   }
 
   return (
-    <View style={[styles.overlay, { height }]}>
-      {/* Tapping the dimmed backdrop closes the sheet. */}
-      <Pressable
-        style={StyleSheet.absoluteFill}
-        onPress={dismissFromBackdrop}
-        accessibilityRole="button"
-        accessibilityLabel="Close add room"
+    <Screen testID="add-room-screen">
+      <ScreenHeader
+        title={isEditing ? 'Edit room' : 'Add room'}
+        subtitle="Published to your listings on this device."
       />
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.sheetWrap}
-      >
-        <View style={[styles.sheet, { maxHeight: sheetMaxHeight }]} testID="add-room-screen">
-          <View style={styles.grabber} />
+      <ScreenScroll contentContainerStyle={styles.content}>
+        {formError ? <InlineAlert tone="danger" message={formError} /> : null}
+        {savedMessage ? <InlineAlert tone="success" message={savedMessage} /> : null}
 
-          <View style={styles.sheetHeader}>
-            <View style={styles.sheetTitleBlock}>
-              <AppText variant="heading" accessibilityRole="header">
-                {isEditing ? 'Edit room' : 'Add room'}
-              </AppText>
-              <AppText variant="caption" color={colors.textMuted}>
-                Published to your listings on this device.
-              </AppText>
-            </View>
-            <Pressable
-              onPress={dismiss}
-              hitSlop={12}
-              accessibilityRole="button"
-              accessibilityLabel="Close"
-              style={({ pressed }) => [styles.closeButton, pressed && styles.pressed]}
-            >
-              <Ionicons name="close" size={20} color={colors.text} />
-            </Pressable>
-          </View>
+        <TextField
+          label="Listing title"
+          required
+          value={values.title}
+          onChangeText={(value) => update('title', value)}
+          placeholder="Bright studio near UP Diliman"
+          error={errors.title}
+          autoCapitalize="sentences"
+        />
 
-          <ScrollView
-            style={styles.body}
-            contentContainerStyle={styles.bodyContent}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            showsVerticalScrollIndicator={false}
-          >
-            {formError ? <InlineAlert tone="danger" message={formError} /> : null}
-            {photoNotice ? <InlineAlert tone="warning" message={photoNotice} /> : null}
-            {savedMessage ? <InlineAlert tone="success" message={savedMessage} /> : null}
+        <SelectField
+          label="Room type"
+          required
+          value={values.roomType}
+          options={ROOM_TYPE_OPTIONS}
+          onChange={(value) => update('roomType', value)}
+          error={errors.roomType}
+        />
 
-            {/* Photos */}
-            <View style={styles.fieldBlock}>
-              <AppText variant="captionStrong">Photos</AppText>
-              <View style={styles.photoRow}>
-                {images.map((uri) => (
-                  <View key={uri} style={styles.thumbWrap}>
-                    <SmartImage
-                      uri={uri}
-                      style={styles.thumb}
-                      borderRadius={radii.md}
-                      accessibilityLabel="Room photo"
-                    />
-                    <Pressable
-                      onPress={() => removePhoto(uri)}
-                      hitSlop={8}
-                      accessibilityRole="button"
-                      accessibilityLabel="Remove photo"
-                      style={({ pressed }) => [styles.thumbRemove, pressed && styles.pressed]}
-                    >
-                      <Ionicons name="close" size={13} color={colors.white} />
-                    </Pressable>
-                  </View>
-                ))}
+        <TextField
+          label="Monthly rent"
+          required
+          prefix="₱"
+          keyboardType="number-pad"
+          value={values.monthlyRent}
+          onChangeText={(value) => update('monthlyRent', value)}
+          placeholder="4500"
+          error={errors.monthlyRent}
+          hint="Amount in pesos per month."
+        />
 
-                {images.length < MAX_PHOTOS ? (
-                  <Pressable
-                    onPress={() => void pickPhotos()}
-                    accessibilityRole="button"
-                    accessibilityLabel="Add photo"
-                    style={({ pressed }) => [styles.addPhoto, pressed && styles.pressed]}
-                  >
-                    <Ionicons name="camera-outline" size={20} color={colors.primary} />
-                    <AppText variant="caption" color={colors.primary}>
-                      Add photo
-                    </AppText>
-                  </Pressable>
-                ) : null}
-              </View>
-              <AppText variant="caption" color={colors.textMuted}>
-                Up to {MAX_PHOTOS} pictures. Photos stay on this device.
-              </AppText>
-            </View>
+        <SelectField
+          label="City"
+          required
+          value={values.city}
+          options={CITY_OPTIONS}
+          onChange={(value) => update('city', value)}
+          error={errors.city}
+        />
 
-            <TextField
-              label="Listing title"
-              required
-              value={values.title}
-              onChangeText={(value) => update('title', value)}
-              placeholder="Bright studio near UP Diliman"
-              error={errors.title}
-              autoCapitalize="sentences"
-            />
+        <TextField
+          label="Barangay"
+          required
+          value={values.barangay}
+          onChangeText={(value) => update('barangay', value)}
+          placeholder="Barangay UP Campus"
+          error={errors.barangay}
+          autoCapitalize="words"
+        />
 
-            <SelectField
-              label="Room type"
-              required
-              value={values.roomType}
-              options={ROOM_TYPE_OPTIONS}
-              onChange={(value) => update('roomType', value)}
-              error={errors.roomType}
-            />
+        <TextField
+          label="Nearest landmark"
+          value={values.landmark}
+          onChangeText={(value) => update('landmark', value)}
+          placeholder="Shopping center, school, terminal"
+          error={errors.landmark}
+          autoCapitalize="words"
+        />
 
-            <TextField
-              label="Monthly rent"
-              required
-              prefix="₱"
-              keyboardType="number-pad"
-              value={values.monthlyRent}
-              onChangeText={(value) => update('monthlyRent', value)}
-              placeholder="4500"
-              error={errors.monthlyRent}
-              hint="Amount in pesos per month."
-            />
+        <DateField
+          label="Available from"
+          required
+          value={values.availableFrom}
+          onChange={(value) => update('availableFrom', value)}
+          error={errors.availableFrom}
+        />
 
-            <SelectField
-              label="City"
-              required
-              value={values.city}
-              options={CITY_OPTIONS}
-              onChange={(value) => update('city', value)}
-              error={errors.city}
-            />
+        <TextField
+          label="Slots available"
+          required
+          keyboardType="number-pad"
+          value={values.slots}
+          onChangeText={(value) => update('slots', value)}
+          placeholder="1"
+          error={errors.slots}
+          hint="How many people can still move in."
+        />
 
-            <TextField
-              label="Barangay"
-              required
-              value={values.barangay}
-              onChangeText={(value) => update('barangay', value)}
-              placeholder="Barangay UP Campus"
-              error={errors.barangay}
-              autoCapitalize="words"
-            />
+        <TextField
+          label="Description"
+          multiline
+          value={values.description}
+          onChangeText={(value) => update('description', value)}
+          placeholder="What makes this room a good fit?"
+          error={errors.description}
+        />
 
-            <TextField
-              label="Nearest landmark"
-              value={values.landmark}
-              onChangeText={(value) => update('landmark', value)}
-              placeholder="Shopping center, school, terminal"
-              error={errors.landmark}
-              autoCapitalize="words"
-            />
+        <AppText variant="caption" color={colors.textMuted}>
+          Rooms you add live on this device only — there is no server behind them.
+        </AppText>
 
-            <DateField
-              label="Available from"
-              required
-              value={values.availableFrom}
-              onChange={(value) => update('availableFrom', value)}
-              error={errors.availableFrom}
-            />
-
-            <TextField
-              label="Slots available"
-              required
-              keyboardType="number-pad"
-              value={values.slots}
-              onChangeText={(value) => update('slots', value)}
-              placeholder="1"
-              error={errors.slots}
-              hint="How many people can still move in."
-            />
-
-            <TextField
-              label="Description"
-              multiline
-              value={values.description}
-              onChangeText={(value) => update('description', value)}
-              placeholder="What makes this room a good fit?"
-              error={errors.description}
-            />
-
-            <AppText variant="caption" color={colors.textMuted}>
-              Rooms you add live on this device only — there is no server behind them.
-            </AppText>
-          </ScrollView>
-
-          {/* Pinned actions: always reachable, even on a small phone. */}
-          <View style={styles.footer}>
-            <Button
-              label={isEditing ? 'Save changes' : 'Add room'}
-              icon={isEditing ? 'checkmark' : 'add'}
-              isLoading={isSaving}
-              onPress={() => void handleSubmit()}
-              style={styles.footerPrimary}
-            />
-            <Button label="Cancel" variant="ghost" onPress={dismiss} style={styles.footerGhost} />
-          </View>
+        <View style={styles.actions}>
+          <Button
+            label={isEditing ? 'Save changes' : 'Add room'}
+            icon={isEditing ? 'checkmark' : 'add'}
+            isLoading={isSaving}
+            fullWidth
+            onPress={() => void handleSubmit()}
+          />
+          <Button label="Cancel" variant="ghost" fullWidth onPress={dismiss} />
         </View>
-      </KeyboardAvoidingView>
-    </View>
+      </ScreenScroll>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(10, 25, 47, 0.45)',
-    justifyContent: 'flex-end',
-  },
-  sheetWrap: {
-    width: '100%',
-  },
-  sheet: {
-    backgroundColor: colors.background,
-    borderTopLeftRadius: radii.xl,
-    borderTopRightRadius: radii.xl,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: -4 },
-    elevation: 12,
-  },
-  grabber: {
-    alignSelf: 'center',
-    width: 44,
-    height: 4,
-    borderRadius: radii.pill,
-    backgroundColor: colors.border,
-    marginBottom: spacing.sm,
-  },
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    paddingBottom: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  sheetTitleBlock: { flex: 1, gap: 2 },
-  closeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: radii.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surfaceMuted,
-  },
-  body: {
-    flex: 1,
-  },
-  bodyContent: {
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.lg,
-    gap: spacing.md,
-  },
-  fieldBlock: { gap: spacing.sm },
-  photoRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  thumbWrap: {
-    position: 'relative',
-  },
-  thumb: {
-    width: 76,
-    height: 76,
-  },
-  thumbRemove: {
-    position: 'absolute',
-    top: -6,
-    right: -6,
-    width: 22,
-    height: 22,
-    borderRadius: radii.pill,
-    backgroundColor: colors.dark ?? '#0A192F',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: colors.white,
-  },
-  addPhoto: {
-    width: 76,
-    height: 76,
-    borderRadius: radii.md,
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
-    borderColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
-    backgroundColor: colors.surfaceMuted,
-  },
-  footer: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    paddingTop: spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-  },
-  footerPrimary: { flex: 1 },
-  footerGhost: { minWidth: 96 },
-  pressed: { opacity: 0.7 },
+  content: { gap: spacing.md },
+  actions: { gap: spacing.sm, marginTop: spacing.xs },
 });

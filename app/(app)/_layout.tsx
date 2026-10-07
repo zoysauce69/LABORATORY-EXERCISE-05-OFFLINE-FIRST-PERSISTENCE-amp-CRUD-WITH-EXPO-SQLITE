@@ -57,14 +57,7 @@ export default function AppLayout() {
       <Stack.Screen name="messages/index" />
       <Stack.Screen name="messages/[id]" />
       <Stack.Screen name="notifications" />
-      <Stack.Screen
-        name="add-room"
-        options={{
-          // Floating sheet: the screen behind stays visible under the overlay.
-          contentStyle: { backgroundColor: 'transparent' },
-          animation: 'fade',
-        }}
-      />
+      <Stack.Screen name="add-room" />
       <Stack.Screen name="manage-rooms" />
       <Stack.Screen name="edit-profile" />
       <Stack.Screen name="settings" />
