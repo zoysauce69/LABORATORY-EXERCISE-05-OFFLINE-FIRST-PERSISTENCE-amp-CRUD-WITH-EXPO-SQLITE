@@ -1,98 +1,172 @@
 import { useState } from 'react';
-import { StyleSheet, View, Pressable } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useRouter } from 'expo-router';
+import { Controller, useForm } from 'react-hook-form';
 
-import { AppText, Button } from '@/components/ui';
-import { useAuth } from '@/hooks/use-auth';
-import { spacing, radii, palette } from '@/theme';
+import { AuthShell } from '@/components/auth-shell';
+import { TextField } from '@/components/form-fields';
+import { AppText, Button, InlineAlert } from '@/components/ui';
+import { DEMO_CREDENTIALS_NOTE, DEMO_NOTICE_BODY } from '@/constants/demo';
+import { useApp } from '@/hooks/use-app';
+import { toMessage } from '@/lib/errors';
+import { DEMO_CREDENTIALS } from '@/lib/mock-data';
+import { colors, radii, spacing } from '@/theme';
+import { signInSchema, type SignInValues } from '@/utils/validation';
 
-const BG = '#0F2554';
-const TEXT_DIM = 'rgba(255,255,255,0.65)';
-
-export default function WelcomeScreen() {
+export default function SignInScreen() {
   const router = useRouter();
-  const { setDemoRole } = useAuth();
-  const [picking, setPicking] = useState(false);
+  const { signIn } = useApp();
+  const [formError, setFormError] = useState<string | null>(null);
 
-  function go(role: 'student' | 'landlord') {
-    setDemoRole?.(role);
-    router.replace('/');
+  const {
+    control,
+    handleSubmit,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<SignInValues>({
+    resolver: zodResolver(signInSchema),
+    defaultValues: { email: '', password: '' },
+  });
+
+  async function onSubmit(values: SignInValues) {
+    setFormError(null);
+
+    const result = await signIn(values.email, values.password);
+    if (!result.ok) {
+      setFormError(toMessage(result.error, 'We could not sign you in.'));
+      // Put the failure next to the field it is about rather than only at the
+      // top of the form.
+      if (result.error.code === 'invalid_credentials') {
+        setError('password', { message: 'That password does not match this email.' });
+      }
+      return;
+    }
+
+    router.replace('/(app)/(tabs)');
   }
 
   return (
-    <View style={styles.root}>
-      {/* Logo block */}
-      <View style={styles.logoWrap}>
-        <View style={styles.logoBox}>
-          <Ionicons name="home" size={40} color="#fff" />
-        </View>
-        <AppText style={styles.brand}>RoomLink</AppText>
-        <AppText style={styles.tagline}>Find Your Next Home</AppText>
-      </View>
-
-      {/* Centre copy */}
-      <AppText style={styles.sub} align="center">
-        Rooms. Apartments. Roommates.{'\n'}All in one place.
-      </AppText>
-
-      {/* CTA */}
-      <View style={styles.actions}>
-        {!picking ? (
-          <>
-            <Button label="Get Started" onPress={() => go('student')} fullWidth style={styles.cta} />
-            <Pressable onPress={() => setPicking(true)} style={styles.ghost} accessibilityRole="button">
-              <AppText style={styles.ghostText}>Log In</AppText>
-            </Pressable>
-          </>
-        ) : (
-          <>
-            <AppText style={[styles.tagline, { marginBottom: spacing.xs }]} align="center">
-              Continue as…
+    <AuthShell
+      title="Welcome back"
+      subtitle="Sign in to see the rooms and roommates that match you."
+      footer={
+        <AppText variant="body" align="center">
+          New to RoomLink?{' '}
+          <Pressable
+            onPress={() => router.push('/(auth)/sign-up')}
+            accessibilityRole="link"
+            accessibilityLabel="Create an account"
+          >
+            <AppText variant="bodyStrong" color={colors.primary}>
+              Create an account
             </AppText>
-            <Button label="Student" onPress={() => go('student')} fullWidth style={styles.cta} />
-            <Button label="Landlord" onPress={() => go('landlord')} variant="secondary" fullWidth style={styles.secondary} />
-            <Pressable onPress={() => setPicking(false)} style={styles.ghost} accessibilityRole="button">
-              <AppText style={styles.ghostText}>← Back</AppText>
-            </Pressable>
-          </>
-        )}
+          </Pressable>
+        </AppText>
+      }
+    >
+      <InlineAlert tone="info" title="Demo app" message={DEMO_NOTICE_BODY} />
+
+      <View style={styles.demoBox}>
+        <View style={styles.demoHeader}>
+          <Ionicons name="flash" size={16} color={colors.primary} />
+          <AppText variant="captionStrong" color={colors.primary}>
+            Try the demo account
+          </AppText>
+        </View>
+        <AppText variant="caption">{DEMO_CREDENTIALS_NOTE}</AppText>
+        <Button
+          label="Use the demo account"
+          variant="secondary"
+          size="sm"
+          icon="flash"
+          onPress={() => {
+            // Signing straight in is one tap and beats filling in a form that is
+            // already printed on screen.
+            void signIn(DEMO_CREDENTIALS.email, DEMO_CREDENTIALS.password).then((result) => {
+              if (result.ok) router.replace('/(app)/(tabs)');
+              else setFormError(toMessage(result.error));
+            });
+          }}
+          style={styles.demoButton}
+        />
       </View>
-    </View>
+
+      {formError ? <InlineAlert tone="danger" message={formError} /> : null}
+
+      <Controller
+        control={control}
+        name="email"
+        render={({ field }) => (
+          <TextField
+            label="Email"
+            value={field.value}
+            onChangeText={field.onChange}
+            onBlur={field.onBlur}
+            error={errors.email?.message}
+            placeholder="you@example.com"
+            icon="mail-outline"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            required
+          />
+        )}
+      />
+
+      <Controller
+        control={control}
+        name="password"
+        render={({ field }) => (
+          <TextField
+            label="Password"
+            value={field.value}
+            onChangeText={field.onChange}
+            onBlur={field.onBlur}
+            error={errors.password?.message}
+            placeholder="Your password"
+            icon="lock-closed-outline"
+            secureTextEntry
+            required
+            returnKeyType="go"
+            onSubmitEditing={() => void handleSubmit(onSubmit)()}
+          />
+        )}
+      />
+
+      <Pressable
+        onPress={() => router.push('/(auth)/forgot-password')}
+        accessibilityRole="link"
+        accessibilityLabel="Forgot your password"
+        style={styles.forgotLink}
+      >
+        <AppText variant="captionStrong" color={colors.primary}>
+          Forgot your password?
+        </AppText>
+      </Pressable>
+
+      <Button
+        label="Sign in"
+        onPress={() => void handleSubmit(onSubmit)()}
+        isLoading={isSubmitting}
+        fullWidth
+        size="lg"
+      />
+    </AuthShell>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: BG,
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 100,
-    paddingBottom: 60,
-    paddingHorizontal: spacing.xl,
+  forgotLink: { alignSelf: 'flex-end', paddingVertical: spacing.xs },
+  demoBox: {
+    gap: spacing.sm,
+    padding: spacing.lg,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.primarySoftBorder,
+    backgroundColor: colors.primarySoft,
   },
-  logoWrap: { alignItems: 'center', gap: spacing.md },
-  logoBox: {
-    width: 80,
-    height: 80,
-    borderRadius: radii.xl,
-    backgroundColor: palette.blue600,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-  },
-  brand: { fontSize: 32, fontWeight: '700', color: '#fff' },
-  tagline: { fontSize: 15, color: TEXT_DIM },
-  sub: { fontSize: 15, color: TEXT_DIM, lineHeight: 24 },
-  actions: { width: '100%', gap: spacing.md },
-  cta: { backgroundColor: palette.blue500 },
-  secondary: { borderColor: 'rgba(255,255,255,0.35)' },
-  ghost: { alignItems: 'center', paddingVertical: spacing.sm },
-  ghostText: { color: TEXT_DIM, fontSize: 15, fontWeight: '600' },
+  demoHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  demoButton: { alignSelf: 'flex-start', marginTop: spacing.xs },
 });

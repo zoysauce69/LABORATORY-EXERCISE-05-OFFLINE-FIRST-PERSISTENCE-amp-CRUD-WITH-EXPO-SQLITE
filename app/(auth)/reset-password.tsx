@@ -1,114 +1,152 @@
-import { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { useState } from 'react';
 
-import { useRouter } from 'expo-router';
-import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Controller, useForm } from 'react-hook-form';
 
 import { AuthShell } from '@/components/auth-shell';
-import { PasswordField } from '@/components/form-fields';
-import { AppText, Button, InlineAlert } from '@/components/ui';
-import { useAction } from '@/hooks/use-async-data';
-import { authService } from '@/services/auth-service';
-import { supabase } from '@/lib/supabase';
+import { TextField } from '@/components/form-fields';
+import { Button, InlineAlert } from '@/components/ui';
+import { toMessage } from '@/lib/errors';
+import { requestPasswordReset, resetPassword } from '@/services/auth-service';
+import { DEMO_CREDENTIALS } from '@/lib/mock-data';
 import { resetPasswordSchema, type ResetPasswordValues } from '@/utils/validation';
-import { colors, spacing } from '@/theme';
 
-/**
- * Password reset landing screen.
- *
- * The recovery link signs the user in through a `PASSWORD_RECOVERY` event, so by
- * the time this screen renders there should already be a session. If there is
- * not, the link was opened on a different device or has expired, and we say so
- * rather than silently failing on submit.
- */
 export default function ResetPasswordScreen() {
   const router = useRouter();
-  const [hasSession, setHasSession] = useState<boolean | null>(null);
+  // Both are filled in by the forgot-password screen. `code` is prefilled with
+  // the value that screen already displayed, so the common path is one tap.
+  const params = useLocalSearchParams<{ email?: string; code?: string }>();
+
+  const [email] = useState(params.email ?? DEMO_CREDENTIALS.email);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
 
   const {
     control,
     handleSubmit,
-    formState,
+    setValue,
+    formState: { errors, isSubmitting },
   } = useForm<ResetPasswordValues>({
     resolver: zodResolver(resetPasswordSchema),
-    defaultValues: { password: '', confirmPassword: '' },
+    defaultValues: { code: params.code ?? '', password: '', confirmPassword: '' },
   });
 
-  const { run, isPending, error } = useAction(authService.updatePassword);
+  async function onSubmit(values: ResetPasswordValues) {
+    setFormError(null);
 
-  useEffect(() => {
-    void supabase.auth.getSession().then(({ data }) => {
-      setHasSession(Boolean(data.session));
-    });
-  }, []);
+    const result = await resetPassword(email, values.code, values.password);
+    if (!result.ok) {
+      setFormError(toMessage(result.error, 'We could not reset your password.'));
+      return;
+    }
 
-  const onSubmit = handleSubmit(async ({ password }) => {
-    const result = await run(password);
-    if (result.ok) router.replace('/');
-  });
-
-  if (hasSession === false) {
-    return (
-      <AuthShell
-        title="This link is no longer valid"
-        subtitle="Reset links work once and expire after an hour."
-        footer={
-          <Button
-            label="Request a new link"
-            onPress={() => router.replace('/(auth)/forgot-password')}
-            fullWidth
-          />
-        }
-      >
-        <InlineAlert
-          tone="warning"
-          title="Open the link on the same device"
-          message="For security, password reset links only work in the browser or app where they were opened."
-        />
-      </AuthShell>
-    );
+    setDone(true);
+    // Straight to sign-in: the account exists and the new password is now the
+    // only way in, so staying here would just be a dead end.
+    setTimeout(() => {
+      router.replace('/(auth)/sign-in');
+    }, 1200);
   }
 
   return (
-    <AuthShell title="Choose a new password" subtitle="Pick something you have not used before.">
-      <View style={styles.form}>
-        <PasswordField
-          label="New password"
-          name="password"
-          control={control}
-          placeholder="At least 8 characters"
-          autoComplete="new-password"
-          returnKeyType="next"
-          required
-          hint="Must include at least one letter and one number."
-          error={formState.errors.password?.message}
+    <AuthShell
+      title="Choose a new password"
+      subtitle={
+        done
+          ? 'Password updated. Taking you back to sign in…'
+          : `Use the code we sent to ${email}.`
+      }
+    >
+      {done ? (
+        <InlineAlert
+          tone="success"
+          title="Password updated"
+          message="Sign in with your new password."
         />
+      ) : (
+        <>
+          {formError ? <InlineAlert tone="danger" message={formError} /> : null}
 
-        <PasswordField
-          label="Confirm new password"
-          name="confirmPassword"
-          control={control}
-          placeholder="Type it again"
-          autoComplete="new-password"
-          returnKeyType="go"
-          onSubmitEditing={onSubmit}
-          required
-          error={formState.errors.confirmPassword?.message}
-        />
+          <Controller
+            control={control}
+            name="code"
+            render={({ field }) => (
+              <TextField
+                label="Reset code"
+                value={field.value}
+                onChangeText={field.onChange}
+                onBlur={field.onBlur}
+                error={errors.code?.message}
+                placeholder="123456"
+                icon="key-outline"
+                keyboardType="number-pad"
+                maxLength={6}
+                required
+              />
+            )}
+          />
 
-        {error ? <InlineAlert tone="danger" message={error} /> : null}
+          <Controller
+            control={control}
+            name="password"
+            render={({ field }) => (
+              <TextField
+                label="New password"
+                value={field.value}
+                onChangeText={field.onChange}
+                onBlur={field.onBlur}
+                error={errors.password?.message}
+                placeholder="At least 8 characters"
+                icon="lock-closed-outline"
+                secureTextEntry
+                required
+              />
+            )}
+          />
 
-        <Button label="Update password" onPress={onSubmit} isLoading={isPending} fullWidth />
+          <Controller
+            control={control}
+            name="confirmPassword"
+            render={({ field }) => (
+              <TextField
+                label="Confirm new password"
+                value={field.value}
+                onChangeText={field.onChange}
+                onBlur={field.onBlur}
+                error={errors.confirmPassword?.message}
+                placeholder="Type it again"
+                icon="lock-closed-outline"
+                secureTextEntry
+                required
+                returnKeyType="go"
+                onSubmitEditing={() => void handleSubmit(onSubmit)()}
+              />
+            )}
+          />
 
-        <AppText variant="caption" align="center" color={colors.textMuted}>
-          Updating your password signs you out on every other device.
-        </AppText>
-      </View>
+          <Button
+            label="Update password"
+            onPress={() => void handleSubmit(onSubmit)()}
+            isLoading={isSubmitting}
+            fullWidth
+            size="lg"
+          />
+
+          <Button
+            label="I did not get a code"
+            variant="ghost"
+            size="sm"
+            icon="refresh-outline"
+            onPress={() => {
+              // No inbox to go back to, so resend straight from here.
+              void requestPasswordReset(email).then((result) => {
+                if (result.ok) setValue('code', result.data.code);
+              });
+            }}
+          />
+        </>
+      )}
     </AuthShell>
   );
 }
-
-const styles = StyleSheet.create({
-  form: { gap: spacing.lg },
-});

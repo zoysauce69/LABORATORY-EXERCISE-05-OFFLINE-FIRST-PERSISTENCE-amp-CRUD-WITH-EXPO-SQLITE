@@ -1,167 +1,204 @@
-import type { AuthError, Session, User } from '@supabase/supabase-js';
+/**
+ * Simulated authentication.
+ *
+ * There is no auth provider. Accounts are a local list in AsyncStorage, the
+ * session is a stored record, and route protection is a check in
+ * `app/(app)/_layout.tsx`. This is what makes every feature reachable without
+ * real credentials while still exercising the sign-in / sign-out flow.
+ *
+ * SECURITY: `passwordHash` is obfuscation, not hashing. See `LocalAccount`.
+ */
 
-import { AppError, describeSupabaseError, ok, runQuery, type Result } from '@/lib/errors';
-import { supabase } from '@/lib/supabase';
+import { fail, ok, type Result } from '@/lib/errors';
+import { DEMO_CREDENTIALS, DEMO_PROFILE } from '@/lib/mock-data';
+import {
+  clearSession,
+  getAccounts,
+  getSession,
+  obfuscatePassword,
+  setAccounts,
+  setSession,
+  type LocalAccount,
+  type StoredSession,
+} from '@/lib/storage';
+import type { Profile } from '@/lib/types';
+
+/** The demo account exists from first launch so sign-in always works. */
+const DEMO_ACCOUNT: LocalAccount = {
+  email: DEMO_CREDENTIALS.email,
+  fullName: DEMO_PROFILE.fullName,
+  passwordHash: obfuscatePassword(DEMO_CREDENTIALS.password),
+  createdAt: new Date().toISOString(),
+};
+
+function normaliseEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+/** The signed-in session, or null when signed out. */
+export async function getCurrentSession(): Promise<Result<StoredSession | null>> {
+  return getSession();
+}
+
+export async function signIn(email: string, password: string): Promise<Result<StoredSession>> {
+  const normalised = normaliseEmail(email);
+  if (normalised.length === 0) return fail('Enter your email address.', 'invalid_input');
+  if (password.length === 0) return fail('Enter your password.', 'invalid_input');
+
+  const accounts = await getAccounts([DEMO_ACCOUNT]);
+  if (!accounts.ok) return fail(accounts.error.message, accounts.error.code);
+
+  const account = accounts.data.find((a) => a.email === normalised);
+  // One message for both "no such account" and "wrong password" so the form
+  // cannot be used to enumerate which emails are registered.
+  if (!account || account.passwordHash !== obfuscatePassword(password)) {
+    return fail('That email and password do not match an account.', 'invalid_credentials');
+  }
+
+  const session: StoredSession = {
+    userId: DEMO_PROFILE.id,
+    email: account.email,
+    signedInAt: new Date().toISOString(),
+  };
+
+  const written = await setSession(session);
+  if (!written.ok) return fail(written.error.message, written.error.code);
+
+  return ok(session);
+}
 
 export interface SignUpInput {
-  email: string;
-  password: string;
   fullName: string;
-  phone: string;
-  role: 'student' | 'landlord';
-  businessName?: string | undefined;
-}
-
-export interface SignInInput {
   email: string;
   password: string;
 }
 
-/** Maps Supabase auth messages onto something a person can act on. */
-function authMessage(error: AuthError | null, fallback: string): AppError {
-  if (!error) return new AppError(fallback, 'auth_error');
+export async function signUp(input: SignUpInput): Promise<Result<StoredSession>> {
+  const fullName = input.fullName.trim();
+  const normalised = normaliseEmail(input.email);
 
-  const message = error.message.toLowerCase();
-
-  if (message.includes('invalid login credentials')) {
-    return new AppError('That email and password combination is not correct.', error.code ?? 'auth_error');
+  if (fullName.length < 2) return fail('Enter your full name.', 'invalid_input');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalised)) {
+    return fail('Enter a valid email address.', 'invalid_input');
   }
-  if (message.includes('email not confirmed')) {
-    return new AppError('Confirm your email address before signing in.', error.code ?? 'auth_error');
-  }
-  if (message.includes('already registered') || message.includes('already been registered')) {
-    return new AppError('An account already uses that email. Try signing in instead.', error.code ?? 'auth_error');
-  }
-  if (message.includes('password should be')) {
-    return new AppError(
-      'Password must be at least 8 characters and include a letter and a number.',
-      error.code ?? 'weak_password',
-    );
-  }
-  if (message.includes('rate limit') || message.includes('too many')) {
-    return new AppError('Too many attempts. Wait a moment and try again.', error.code ?? 'rate_limited');
-  }
-  if (message.includes('unable to validate email')) {
-    return new AppError('That email address could not be validated.', error.code ?? 'auth_error');
+  if (input.password.length < 8) {
+    return fail('Use a password of at least 8 characters.', 'invalid_input');
   }
 
-  return describeSupabaseError(error, fallback);
+  const accounts = await getAccounts([DEMO_ACCOUNT]);
+  if (!accounts.ok) return fail(accounts.error.message, accounts.error.code);
+
+  if (accounts.data.some((a) => a.email === normalised)) {
+    return fail('An account already exists for that email. Try signing in.', 'duplicate');
+  }
+
+  const account: LocalAccount = {
+    email: normalised,
+    fullName,
+    passwordHash: obfuscatePassword(input.password),
+    createdAt: new Date().toISOString(),
+  };
+
+  const writtenAccounts = await setAccounts([...accounts.data, account]);
+  if (!writtenAccounts.ok) return fail(writtenAccounts.error.message, writtenAccounts.error.code);
+
+  const session: StoredSession = {
+    userId: DEMO_PROFILE.id,
+    email: normalised,
+    signedInAt: new Date().toISOString(),
+  };
+
+  const writtenSession = await setSession(session);
+  if (!writtenSession.ok) return fail(writtenSession.error.message, writtenSession.error.code);
+
+  return ok(session);
 }
 
-export const authService = {
-  /**
-   * Registers the user. The role is written to signup metadata and read once by
-   * the `handle_new_user` trigger; it cannot be changed afterwards.
-   */
-  async signUp(input: SignUpInput): Promise<Result<User>> {
-    const { data, error } = await supabase.auth.signUp({
-      email: input.email,
-      password: input.password,
-      options: {
-        data: {
-          role: input.role,
-          full_name: input.fullName,
-          phone: input.phone,
-          ...(input.businessName ? { business_name: input.businessName } : {}),
-        },
-      },
-    });
+/**
+ * Signs out.
+ *
+ * Only clears the session. Saved rooms, applications, messages, notifications
+ * and the profile all survive, so signing back in restores the demo account's
+ * state instead of resetting the demo every time.
+ */
+export async function signOut(): Promise<Result<true>> {
+  const result = await clearSession();
+  if (!result.ok) return fail(result.error.message, result.error.code);
+  return ok(true);
+}
 
-    if (error) return { ok: false, error: authMessage(error, 'Could not create your account.') };
-    if (!data.user) {
-      return { ok: false, error: new AppError('Could not create your account.', 'auth_error') };
-    }
+/* ------------------------------------------------------------------ */
+/* Password reset (simulated)                                          */
+/* ------------------------------------------------------------------ */
 
-    // Mirror the contact fields into the private details table.
-    const details = await supabase
-      .from('profile_private_details')
-      .upsert({ user_id: data.user.id, phone: input.phone, email: input.email })
-      .select('user_id')
-      .maybeSingle();
+export interface ResetTicket {
+  email: string;
+  code: string;
+  issuedAt: string;
+}
 
-    if (details.error) {
-      // The account exists; surface the partial state honestly.
-      return {
-        ok: false,
-        error: new AppError(
-          'Your account was created but your contact number could not be saved. Open Profile to fix it.',
-          details.error.code ?? 'partial_failure',
-          { details: details.error },
-        ),
-      };
-    }
+/**
+ * Pretends to send a reset code.
+ *
+ * Returns the code so the demo can show it in the UI instead of pretending an
+ * inbox exists. The check is always "is this an email we know about", which is
+ * the same answer a real service would give without leaking account existence
+ * to a third party.
+ */
+export async function requestPasswordReset(email: string): Promise<Result<ResetTicket>> {
+  const normalised = normaliseEmail(email);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalised)) {
+    return fail('Enter a valid email address.', 'invalid_input');
+  }
 
-    return ok(data.user);
-  },
+  const accounts = await getAccounts([DEMO_ACCOUNT]);
+  if (!accounts.ok) return fail(accounts.error.message, accounts.error.code);
 
-  async signIn(input: SignInInput): Promise<Result<Session>> {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: input.email,
-      password: input.password,
-    });
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  return ok({ email: normalised, code, issuedAt: new Date().toISOString() });
+}
 
-    if (error) return { ok: false, error: authMessage(error, 'Could not sign you in.') };
-    if (!data.session) {
-      return { ok: false, error: new AppError('Could not sign you in.', 'auth_error') };
-    }
-    return ok(data.session);
-  },
+export async function resetPassword(
+  email: string,
+  code: string,
+  newPassword: string,
+): Promise<Result<true>> {
+  const normalised = normaliseEmail(email);
+  if (code.trim().length !== 6) return fail('Enter the 6-digit code.', 'invalid_input');
+  if (newPassword.length < 8) {
+    return fail('Use a password of at least 8 characters.', 'invalid_input');
+  }
 
-  /**
-   * Sends a reset email. Always resolves successfully so the response does not
-   * reveal whether an address is registered.
-   */
-  async requestPasswordReset(email: string, redirectTo: string): Promise<Result<true>> {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo,
-    });
+  const accounts = await getAccounts([DEMO_ACCOUNT]);
+  if (!accounts.ok) return fail(accounts.error.message, accounts.error.code);
 
-    if (error) {
-      return { ok: false, error: authMessage(error, 'Could not send the reset email.') };
-    }
-    return ok(true);
-  },
+  const index = accounts.data.findIndex((a) => a.email === normalised);
+  const account = index >= 0 ? accounts.data[index] : undefined;
+  if (!account) return fail('That email and password do not match an account.', 'invalid_credentials');
 
-  /** Completes a recovery flow. The user already has a session from the link. */
-  async updatePassword(password: string): Promise<Result<true>> {
-    const { error } = await supabase.auth.updateUser({ password });
-    if (error) {
-      return { ok: false, error: authMessage(error, 'Could not update your password.') };
-    }
-    return ok(true);
-  },
+  const next = [...accounts.data];
+  next[index] = { ...account, passwordHash: obfuscatePassword(newPassword) };
 
-  async signOut(): Promise<Result<true>> {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      return { ok: false, error: authMessage(error, 'Could not sign you out.') };
-    }
-    return ok(true);
-  },
+  const written = await setAccounts(next);
+  if (!written.ok) return fail(written.error.message, written.error.code);
 
-  /**
-   * Permanent deletion. The RPC removes storage objects and the auth user,
-   * which cascades through every profile-owned table.
-   */
-  async deleteAccount(): Promise<Result<true>> {
-    const result = await runQuery('Account deletion', () =>
-      supabase.rpc('delete_my_account'),
-    );
-    if (!result.ok) return result;
-    return ok(true);
-  },
+  return ok(true);
+}
 
-  async getSession(): Promise<Session | null> {
-    const { data } = await supabase.auth.getSession();
-    return data.session ?? null;
-  },
+/* ------------------------------------------------------------------ */
+/* Profile passthrough                                                 */
+/* ------------------------------------------------------------------ */
 
-  onAuthStateChange(
-    handler: (session: Session | null) => void,
-  ): () => void {
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      handler(session);
-    });
-    return () => data.subscription.unsubscribe();
-  },
-};
+/**
+ * The profile that belongs to the signed-in session.
+ *
+ * There is one profile in this demo — the fixtures always describe the same
+ * person — so this just reads it. Re-exported from the auth service so the
+ * screens have one place to ask "who am I".
+ */
+export async function getSignedInProfile(): Promise<Result<Profile>> {
+  const { getMyProfile } = await import('./profile-service');
+  return getMyProfile();
+}
+
+export { DEMO_CREDENTIALS };

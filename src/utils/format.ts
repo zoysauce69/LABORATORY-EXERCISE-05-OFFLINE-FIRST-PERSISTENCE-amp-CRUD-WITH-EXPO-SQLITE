@@ -1,6 +1,14 @@
 /** Formatting helpers for Philippine pesos, dates and Philippine place names. */
 
-import { format, formatDistanceToNowStrict, isToday, isTomorrow, parseISO } from 'date-fns';
+import {
+  format,
+  formatDistanceToNowStrict,
+  isToday,
+  isTomorrow,
+  isYesterday,
+  parseISO,
+  startOfDay,
+} from 'date-fns';
 
 const pesoFormatter = new Intl.NumberFormat('en-PH', {
   style: 'currency',
@@ -25,6 +33,11 @@ export function formatPeso(amount: number | null | undefined): string {
 /** ₱4,500 /mo */
 export function formatMonthlyRent(amount: number | null | undefined): string {
   return `${formatPeso(amount)}/mo`;
+}
+
+/** "₱4,500–₱7,500" — collapses to one value when min and max are equal. */
+export function formatPesoRange(min: number, max: number): string {
+  return min === max ? formatPeso(min) : `${formatPeso(min)}–${formatPeso(max)}`;
 }
 
 /** 4500 -> "4,500" for text inputs */
@@ -71,6 +84,37 @@ export function formatDate(value: string | Date | null | undefined): string {
   return format(date, 'd MMM yyyy');
 }
 
+/**
+ * "24 Oct" — the compact form for card rows where the year is implied.
+ *
+ * A date in the past still prints its year, because "Available from 3 Jan
+ * 2024" reads very differently from "Available from 3 Jan".
+ */
+export function formatShortDate(value: string | Date | null | undefined): string {
+  const date = value instanceof Date ? value : safeParse(value);
+  if (!date) return '—';
+  return format(date, date.getFullYear() === new Date().getFullYear() ? 'd MMM' : 'd MMM yyyy');
+}
+
+/**
+ * "in 3 weeks" — how far away a future date is.
+ *
+ * Used for move-in and availability copy, where the distance matters more than
+ * the calendar date. Past dates fall back to `formatShortDate` so a stale
+ * fixture still reads sensibly rather than "in -2 weeks".
+ */
+export function formatRelativeFuture(value: string | Date | null | undefined): string {
+  const date = value instanceof Date ? value : safeParse(value);
+  if (!date) return '—';
+
+  const days = Math.round((startOfDay(date).getTime() - startOfDay(new Date()).getTime()) / 86_400_000);
+  if (days <= 0) return formatShortDate(date);
+  if (days === 1) return 'tomorrow';
+  if (days < 14) return `in ${days} days`;
+  if (days % 7 === 0) return `in ${days / 7} week${days === 7 ? '' : 's'}`;
+  return `in ${Math.round(days / 7)} weeks`;
+}
+
 /** "12 Mar 2026, 3:30 PM" */
 export function formatDateTime(value: string | Date | null | undefined): string {
   const date = value instanceof Date ? value : safeParse(value);
@@ -111,8 +155,75 @@ export function formatTimeAgo(value: string | Date | null | undefined): string {
   return `${formatDistanceToNowStrict(date, { addSuffix: true })}`;
 }
 
-/** Combines a Postgres `date` and `time` into a single display value. */
-export function formatAppointment(date: string | null, time: string | null): string {
+/**
+ * A short relative stamp for list rows — "just now", "2h", "3d".
+ *
+ * Deliberately terse: in a conversation list the reader is scanning for the one
+ * thread that changed, so the timestamp only has to establish ordering, and
+ * "5 months ago" next to a name pushes the name off the row.
+ */
+export function formatRelativePast(value: string | Date | null | undefined): string {
+  const date = value instanceof Date ? value : safeParse(value);
+  if (!date) return '—';
+
+  const minutes = Math.round((Date.now() - date.getTime()) / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m`;
+  if (isToday(date)) return `${Math.floor(minutes / 60)}h`;
+  if (isYesterday(date)) return 'yesterday';
+  const days = Math.round((startOfDay(date).getTime() - startOfDay(new Date()).getTime()) / 86_400_000);
+  if (days > 0 && days < 7) return `${days}d`;
+  return format(date, 'd MMM');
+}
+
+/**
+ * The sticky date label between message groups: "Today", "Yesterday", or a date.
+ *
+ * A day is only worth a divider when it changes, so callers compare the
+ * previous return value rather than asking whether a message is "new".
+ */
+export function formatDayDivider(value: string | Date | null | undefined): string {
+  const date = value instanceof Date ? value : safeParse(value);
+  if (!date) return '—';
+  if (isToday(date)) return 'Today';
+  if (isYesterday(date)) return 'Yesterday';
+  return format(date, date.getFullYear() === new Date().getFullYear() ? 'd MMM' : 'd MMM yyyy');
+}
+
+/** The three recency buckets an activity list is grouped into. */
+export type RecencyBucket = 'today' | 'week' | 'older';
+
+export const RECENCY_BUCKETS: readonly RecencyBucket[] = ['today', 'week', 'older'] as const;
+
+/**
+ * Where a timestamp falls relative to now.
+ *
+ * Lives here rather than in the notifications screen because "how old is this"
+ * is a question about time, not about notifications — and because it keeps the
+ * clock read out of render, where a component must stay a pure function of its
+ * props and state.
+ */
+export function recencyBucket(value: string | Date | null | undefined): RecencyBucket {
+  const date = value instanceof Date ? value : safeParse(value);
+  if (!date) return 'older';
+
+  const ageInDays = Math.floor(
+    (startOfDay(new Date()).getTime() - startOfDay(date).getTime()) / 86_400_000,
+  );
+  if (ageInDays <= 0) return 'today';
+  if (ageInDays < 7) return 'week';
+  return 'older';
+}
+
+/** Section heading for a recency bucket, in the order they should appear. */
+export const RECENCY_BUCKET_LABEL: Record<RecencyBucket, string> = {
+  today: 'Today',
+  week: 'Earlier this week',
+  older: 'Older',
+};
+
+/** A date and time joined into one display value. */
+export function formatDateAndTime(date: string | null, time: string | null): string {
   if (!date) return '—';
   return `${formatDate(date)}, ${formatTime(time)}`;
 }

@@ -1,297 +1,184 @@
-import { DEMO_MODE } from '@/lib/config';
-import { DEMO_ROOMMATES } from '@/lib/demo-data';
-import { AppError, fail, ok, runCount, runOptionalQuery, runQuery, type Result } from '@/lib/errors';
-import { supabase } from '@/lib/supabase';
+/**
+ * Roommate search, filtering, sorting and scoring.
+ *
+ * Reads the fixtures in `@/lib/mock-data`, recomputes the compatibility score
+ * and match reasons against the signed-in profile via `@/services/compatibility`,
+ * and overlays the two pieces of state the user owns — saved ids and any
+ * outgoing request — from AsyncStorage.
+ */
+
+import { ROOMMATES, findRoommate } from '@/lib/mock-data';
 import type {
-  RoommateMatchResult,
-  RoommateProfileInsert,
-  RoommateProfileRow,
-  RoommateRequestRow,
+  Profile,
+  Roommate,
+  RoommateFilters,
   RoommateRequestStatus,
-} from '@/lib/database.types';
-import {
-  getRoommateRequests,
-  addRoommateRequest,
-  updateRoommateRequest,
-  removeRoommateRequest,
-} from '@/lib/async-storage';
+  RoommateSort,
+  SleepSchedule,
+  StudyHabits,
+} from '@/lib/types';
+import { matchReasons, scoreRoommate } from './compatibility';
 
-export interface RoommateRequestWithPerson extends RoommateRequestRow {
-  sender: { id: string; full_name: string; avatar_url: string | null } | null;
-  receiver: { id: string; full_name: string; avatar_url: string | null } | null;
+function matchesQuery(roommate: Roommate, rawQuery: string): boolean {
+  const query = rawQuery.trim().toLowerCase();
+  if (query.length === 0) return true;
+
+  const haystack = [
+    roommate.fullName,
+    roommate.headline,
+    roommate.about,
+    roommate.occupation,
+    roommate.schoolOrWork,
+    roommate.preferredCity,
+    roommate.preferredBarangay,
+    ...roommate.interests,
+  ]
+    .join(' ')
+    .toLowerCase();
+
+  return query.split(/\s+/).every((term) => haystack.includes(term));
 }
 
-export interface RoommateSearchParams {
-  query?: string | null;
-  city?: string | null;
-  minBudget?: number | null;
-  maxBudget?: number | null;
-  moveInBefore?: string | null;
-  userId?: string | null;
-  limit?: number;
-  offset?: number;
+/** The roommate can afford at least the bottom of the user's budget band. */
+function budgetOverlaps(
+  roommate: Roommate,
+  min: number | null,
+  max: number | null,
+): boolean {
+  if (min !== null && roommate.budgetMax < min) return false;
+  if (max !== null && roommate.budgetMin > max) return false;
+  return true;
 }
 
-async function searchRoommates(
-  params: RoommateSearchParams,
-): Promise<Result<RoommateMatchResult[]>> {
-  return runQuery('Find roommates', () =>
-    supabase.rpc('search_roommates', {
-      p_query: params.query ?? null,
-      p_city: params.city ?? null,
-      p_min_budget: params.minBudget ?? null,
-      p_max_budget: params.maxBudget ?? null,
-      p_move_in_before: params.moveInBefore ?? null,
-      p_user_id: params.userId ?? null,
-      p_limit: params.limit ?? 30,
-      p_offset: params.offset ?? 0,
-    }),
-  );
-}
-
-export const roommateService = {
-  async search(_params: RoommateSearchParams): Promise<Result<RoommateMatchResult[]>> {
-    if (DEMO_MODE) return ok(DEMO_ROOMMATES);
-    return searchRoommates(_params);
-  },
-
-  async getMatchByUserId(candidateId: string): Promise<Result<RoommateMatchResult | null>> {
-    if (DEMO_MODE) return ok(DEMO_ROOMMATES.find((r) => r.user_id === candidateId) ?? null);
-    const result = await searchRoommates({ userId: candidateId, limit: 1 });
-    if (!result.ok) return result;
-    return ok(result.data[0] ?? null);
-  },
-
-  async getMyProfile(userId: string): Promise<Result<RoommateProfileRow | null>> {
-    if (DEMO_MODE) return ok(null);
-    return runOptionalQuery('Load roommate profile', () =>
-      supabase.from('roommate_profiles').select('*').eq('user_id', userId).maybeSingle(),
-    );
-  },
-
-  async upsertProfile(
-    userId: string,
-    values: Omit<RoommateProfileInsert, 'user_id'>,
-  ): Promise<Result<RoommateProfileRow>> {
-    if (DEMO_MODE) return fail('Demo mode: profile changes are not saved.', 'demo');
-    return runQuery('Save roommate profile', () =>
-      supabase
-        .from('roommate_profiles')
-        .upsert({ user_id: userId, ...values }, { onConflict: 'user_id' })
-        .select('*')
-        .single(),
-    );
-  },
-
-  async deleteProfile(userId: string): Promise<Result<true>> {
-    if (DEMO_MODE) return ok(true);
-    const result = await runQuery('Delete roommate profile', () =>
-      supabase.from('roommate_profiles').delete().eq('user_id', userId).select('user_id'),
-    );
-    if (!result.ok) return result;
-    return ok(true);
-  },
-
-  async sendRequest(
-    senderId: string,
-    receiverId: string,
-    message?: string | undefined,
-  ): Promise<Result<RoommateRequestRow>> {
-    if (DEMO_MODE) {
-      if (senderId === receiverId) {
-        return fail('You cannot send a roommate request to yourself.', 'self_request');
-      }
-
-      const id = `roommate-req-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-      const now = new Date().toISOString();
-
-      const request: RoommateRequestRow = {
-        id,
-        sender_id: senderId,
-        receiver_id: receiverId,
-        status: 'pending',
-        message: message?.trim() ? message.trim() : null,
-        responded_at: null,
-        created_at: now,
-        updated_at: now,
-      };
-
-      await addRoommateRequest(request);
-      return ok(request);
-    }
-
-    if (senderId === receiverId) {
-      return fail('You cannot send a roommate request to yourself.', 'self_request');
-    }
-
-    const target = await runOptionalQuery('Load candidate', () =>
-      supabase
-        .from('roommate_profiles')
-        .select('id, is_active, discoverable')
-        .eq('user_id', receiverId)
-        .maybeSingle(),
-    );
-
-    if (!target.ok) return target;
-    if (!target.data) return fail('That person is no longer looking for a roommate.', 'not_discoverable');
-    if (!target.data.is_active || !target.data.discoverable) {
-      return fail('That person is not accepting roommate requests right now.', 'not_discoverable');
-    }
-
-    return runQuery('Send roommate request', () =>
-      supabase
-        .from('roommate_requests')
-        .insert({
-          sender_id: senderId,
-          receiver_id: receiverId,
-          message: message?.trim() ? message.trim() : null,
-        })
-        .select('*')
-        .single(),
-    );
-  },
-
-  async respondToRequest(
-    requestId: string,
-    userId: string,
-    status: Extract<RoommateRequestStatus, 'accepted' | 'declined'>,
-  ): Promise<Result<RoommateRequestRow>> {
-    if (DEMO_MODE) {
-      const requests = await getRoommateRequests();
-      const request = requests.find((r) => r.id === requestId);
-      
-      if (!request) return fail('That request no longer exists.', 'not_found');
-      if (request.receiver_id !== userId) {
-        return fail('You can only respond to requests sent to you.', 'forbidden');
-      }
-      if (request.status !== 'pending') {
-        return fail('This request has already been answered.', 'already_answered');
-      }
-
-      const updated = await updateRoommateRequest(requestId, {
-        status,
-        responded_at: new Date().toISOString(),
-      });
-      if (!updated) return fail('That request no longer exists.', 'not_found');
-      return ok(updated);
-    }
-
-    const request = await runOptionalQuery('Load request', () =>
-      supabase.from('roommate_requests').select('*').eq('id', requestId).maybeSingle(),
-    );
-    if (!request.ok) return request;
-    if (!request.data) return fail('That request no longer exists.', 'not_found');
-    if (request.data.receiver_id !== userId) {
-      return fail('You can only respond to requests sent to you.', 'forbidden');
-    }
-    if (request.data.status !== 'pending') {
-      return fail('This request has already been answered.', 'already_answered');
-    }
-
-    return runQuery('Update request', () =>
-      supabase
-        .from('roommate_requests')
-        .update({ status, responded_at: new Date().toISOString() })
-        .eq('id', requestId)
-        .select('*')
-        .single(),
-    );
-  },
-
-  async withdrawRequest(
-    requestId: string,
-    userId: string,
-  ): Promise<Result<RoommateRequestRow>> {
-    if (DEMO_MODE) {
-      const requests = await getRoommateRequests();
-      const request = requests.find((r) => r.id === requestId);
-      
-      if (!request) return fail('That request no longer exists.', 'not_found');
-      if (request.sender_id !== userId) {
-        return fail('You can only withdraw requests you sent.', 'forbidden');
-      }
-
-      const updated = await updateRoommateRequest(requestId, {
-        status: 'cancelled',
-        responded_at: new Date().toISOString(),
-      });
-      if (!updated) return fail('That request no longer exists.', 'not_found');
-      return ok(updated);
-    }
-
-    const request = await runOptionalQuery('Load request', () =>
-      supabase.from('roommate_requests').select('*').eq('id', requestId).maybeSingle(),
-    );
-    if (!request.ok) return request;
-    if (!request.data) return fail('That request no longer exists.', 'not_found');
-    if (request.data.sender_id !== userId) {
-      return fail('You can only withdraw requests you sent.', 'forbidden');
-    }
-
-    return runQuery('Withdraw request', () =>
-      supabase
-        .from('roommate_requests')
-        .update({ status: 'cancelled', responded_at: new Date().toISOString() })
-        .eq('id', requestId)
-        .select('*')
-        .single(),
-    );
-  },
-
-  async listRequests(userId: string): Promise<Result<RoommateRequestWithPerson[]>> {
-    if (DEMO_MODE) {
-      const requests = await getRoommateRequests();
-      const userRequests = requests.filter(
-        (r) => r.sender_id === userId || r.receiver_id === userId
+function sortRoommates(roommates: Roommate[], sort: RoommateSort): Roommate[] {
+  const list = [...roommates];
+  switch (sort) {
+    case 'budget_asc':
+      return list.sort((a, b) => a.budgetMin - b.budgetMin);
+    case 'newest':
+      // Fixtures have no signup dates, so "newest" means soonest move-in.
+      return list.sort(
+        (a, b) => new Date(a.moveInDate).getTime() - new Date(b.moveInDate).getTime(),
       );
-      // Return basic format without hydrating people in demo mode
-      return ok(
-        userRequests.map((r) => ({ ...r, sender: null, receiver: null }))
-      );
+    case 'compatibility':
+    default:
+      return list.sort((a, b) => {
+        if (b.compatibilityScore !== a.compatibilityScore) {
+          return b.compatibilityScore - a.compatibilityScore;
+        }
+        return a.fullName.localeCompare(b.fullName);
+      });
+  }
+}
+
+/**
+ * Applies the user's lifestyle to the roommate list.
+ *
+ * `isDiscoverable = false` hides the user from *other* people, but must not
+ * stop them browsing, so this is a filter on the roommate's side only and the
+ * signed-in user is never in `ROOMMATES`.
+ */
+function applyFilters(roommates: Roommate[], filters: RoommateFilters): Roommate[] {
+  return roommates.filter((roommate) => {
+    if (!matchesQuery(roommate, filters.query)) return false;
+    if (filters.city !== null && roommate.preferredCity !== filters.city) return false;
+    if (!budgetOverlaps(roommate, filters.minBudget, filters.maxBudget)) return false;
+
+    if (filters.interests.length > 0) {
+      const owned = new Set(roommate.interests.map((i) => i.toLowerCase()));
+      const shares = filters.interests.some((interest) => owned.has(interest.toLowerCase()));
+      if (!shares) return false;
     }
 
-    const requests = await runQuery('Load roommate requests', () =>
-      supabase
-        .from('roommate_requests')
-        .select('*')
-        .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
-        .order('created_at', { ascending: false }),
-    );
-    if (!requests.ok) return requests;
-
-    const rows = requests.data ?? [];
-    if (rows.length === 0) return ok([]);
-
-    const ids = [...new Set(rows.flatMap((r) => [r.sender_id, r.receiver_id]))];
-    const people = await runQuery('Load people', () =>
-      supabase.from('profiles').select('id, full_name, avatar_url').in('id', ids),
-    );
-    if (!people.ok) return people;
-
-    const byId = new Map((people.data ?? []).map((p) => [p.id, p]));
-    return ok(
-      rows.map((row) => ({
-        ...row,
-        sender: byId.get(row.sender_id) ?? null,
-        receiver: byId.get(row.receiver_id) ?? null,
-      })),
-    );
-  },
-
-  async countIncoming(userId: string): Promise<Result<number>> {
-    if (DEMO_MODE) {
-      const requests = await getRoommateRequests();
-      const count = requests.filter(
-        (r) => r.receiver_id === userId && r.status === 'pending'
-      ).length;
-      return ok(count);
+    if (filters.studyHabits.length > 0 && !filters.studyHabits.includes(roommate.lifestyle.studyHabits)) {
+      return false;
     }
-    return runCount('Count roommate requests', () =>
-      supabase
-        .from('roommate_requests')
-        .select('id', { count: 'exact', head: true })
-        .eq('receiver_id', userId)
-        .eq('status', 'pending'),
-    );
-  },
-};
+
+    if (filters.sleepSchedules.length > 0 && !filters.sleepSchedules.includes(roommate.lifestyle.sleepSchedule)) {
+      return false;
+    }
+
+    if (filters.nonSmokersOnly && roommate.lifestyle.smoking === 'smoker') return false;
+
+    return true;
+  });
+}
+
+/**
+ * Scores, decorates and filters the roommate list.
+ *
+ * `savedIds` and `requests` come from AsyncStorage; passing them in keeps this
+ * function pure and testable, and lets the caller batch its storage reads.
+ */
+export function searchRoommates(
+  profile: Profile,
+  filters: RoommateFilters,
+  savedIds: readonly string[],
+  requests: ReadonlyMap<string, RoommateRequestStatus>,
+): Roommate[] {
+  const scored = ROOMMATES.map((roommate) => ({
+    ...roommate,
+    compatibilityScore: scoreRoommate(profile, roommate),
+    matchReasons: matchReasons(profile, roommate),
+    isSaved: savedIds.includes(roommate.id),
+    requestStatus: requests.get(roommate.id) ?? null,
+  }));
+
+  const filtered = applyFilters(scored, filters);
+  return sortRoommates(filtered, filters.sort);
+}
+
+export function getRoommate(id: string): Roommate | undefined {
+  return findRoommate(id);
+}
+
+/** Decorates a single roommate for the profile screen. */
+export function decorateRoommate(
+  profile: Profile,
+  roommate: Roommate,
+  savedIds: readonly string[],
+  requests: ReadonlyMap<string, RoommateRequestStatus>,
+): Roommate {
+  return {
+    ...roommate,
+    compatibilityScore: scoreRoommate(profile, roommate),
+    matchReasons: matchReasons(profile, roommate),
+    isSaved: savedIds.includes(roommate.id),
+    requestStatus: requests.get(roommate.id) ?? null,
+  };
+}
+
+/** Everyone, scored, for the landing page rail. */
+export function topMatches(profile: Profile, limit = 4): Roommate[] {
+  return ROOMMATES.map((roommate) => ({
+    ...roommate,
+    compatibilityScore: scoreRoommate(profile, roommate),
+    matchReasons: matchReasons(profile, roommate),
+  }))
+    .sort((a, b) => b.compatibilityScore - a.compatibilityScore)
+    .slice(0, limit);
+}
+
+export function budgetBounds(): { min: number; max: number } {
+  if (ROOMMATES.length === 0) return { min: 0, max: 0 };
+  const all = ROOMMATES.flatMap((r) => [r.budgetMin, r.budgetMax]);
+  return { min: Math.min(...all), max: Math.max(...all) };
+}
+
+export const ROOMMATE_SORT_OPTIONS: { value: RoommateSort; label: string }[] = [
+  { value: 'compatibility', label: 'Best compatibility' },
+  { value: 'budget_asc', label: 'Budget: low to high' },
+  { value: 'newest', label: 'Available soonest' },
+];
+
+export const STUDY_HABIT_OPTIONS: { value: StudyHabits; label: string }[] = [
+  { value: 'quiet_study', label: 'Quiet study' },
+  { value: 'study_together', label: 'Study together' },
+  { value: 'no_preference', label: 'No preference' },
+];
+
+export const SLEEP_SCHEDULE_OPTIONS: { value: SleepSchedule; label: string }[] = [
+  { value: 'early_bird', label: 'Early bird' },
+  { value: 'night_owl', label: 'Night owl' },
+  { value: 'flexible', label: 'Flexible' },
+];

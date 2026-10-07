@@ -1,105 +1,142 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { Ionicons } from '@expo/vector-icons';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'expo-router';
 import { Controller, useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import * as Linking from 'expo-linking';
 
 import { AuthShell } from '@/components/auth-shell';
-import { PlainTextField } from '@/components/form-fields';
+import { TextField } from '@/components/form-fields';
 import { AppText, Button, InlineAlert } from '@/components/ui';
-import { useAction } from '@/hooks/use-async-data';
-import { authService } from '@/services/auth-service';
+import { toMessage } from '@/lib/errors';
+import { requestPasswordReset } from '@/services/auth-service';
+import { colors, radii, spacing } from '@/theme';
 import { forgotPasswordSchema, type ForgotPasswordValues } from '@/utils/validation';
-import { colors, spacing } from '@/theme';
+
+interface IssuedCode {
+  email: string;
+  code: string;
+}
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
-  const [sent, setSent] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [issued, setIssued] = useState<IssuedCode | null>(null);
 
   const {
     control,
     handleSubmit,
-    formState,
+    getValues,
+    formState: { errors, isSubmitting },
   } = useForm<ForgotPasswordValues>({
     resolver: zodResolver(forgotPasswordSchema),
     defaultValues: { email: '' },
   });
 
-  const { run, isPending, error } = useAction(async (email: string) =>
-    authService.requestPasswordReset(
-      email,
-      Linking.createURL('/reset-password'),
-    ),
-  );
+  async function onSubmit(values: ForgotPasswordValues) {
+    setFormError(null);
 
-  const onSubmit = handleSubmit(async ({ email }) => {
-    const result = await run(email.trim().toLowerCase());
-    if (result.ok) setSent(true);
-  });
+    const result = await requestPasswordReset(values.email);
+    if (!result.ok) {
+      setFormError(toMessage(result.error, 'We could not send a reset code.'));
+      return;
+    }
 
-  if (sent) {
-    return (
-      <AuthShell
-        title="Check your inbox"
-        subtitle="If that address has a RoomLink account, a password reset link is on its way."
-        onBack={() => router.replace('/(auth)/sign-in')}
-        backLabel="Back to sign in"
-      >
-        <InlineAlert
-          tone="info"
-          title="Link expires in one hour"
-          message="Open the link on this device to choose a new password. If nothing arrives, check your spam folder."
-        />
-        <Button label="Back to sign in" onPress={() => router.replace('/(auth)/sign-in')} fullWidth />
-      </AuthShell>
-    );
+    setIssued({ email: result.data.email, code: result.data.code });
   }
 
   return (
     <AuthShell
       title="Reset your password"
-      subtitle="Enter the email address you signed up with and we will send you a reset link."
+      subtitle="Enter the email you signed up with and we will show you the code."
       onBack={() => router.back()}
       backLabel="Back to sign in"
     >
-      <View style={styles.form}>
+      {formError ? <InlineAlert tone="danger" message={formError} /> : null}
+
+      {issued ? (
+        <View style={styles.codeBox}>
+          <View style={styles.codeHeader}>
+            <Ionicons name="key" size={16} color={colors.success} />
+            <AppText variant="captionStrong" color={colors.success}>
+              Your reset code
+            </AppText>
+          </View>
+          <AppText variant="caption">
+            A real app would email this. This one has no server, so here it is:
+          </AppText>
+          <AppText variant="display" align="center" style={styles.code}>
+            {issued.code}
+          </AppText>
+          <Button
+            label="Enter this code"
+            fullWidth
+            onPress={() =>
+              router.push({
+                pathname: '/(auth)/reset-password',
+                params: { email: issued.email, code: issued.code },
+              })
+            }
+          />
+        </View>
+      ) : (
         <Controller
           control={control}
           name="email"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <PlainTextField
-              label="Email address"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
+          render={({ field }) => (
+            <TextField
+              label="Email"
+              value={field.value}
+              onChangeText={field.onChange}
+              onBlur={field.onBlur}
+              error={errors.email?.message}
               placeholder="you@example.com"
               icon="mail-outline"
-              autoCapitalize="none"
-              autoComplete="email"
-              autoCorrect={false}
               keyboardType="email-address"
-              returnKeyType="go"
-              onSubmitEditing={onSubmit}
+              autoCapitalize="none"
               required
-              error={formState.errors.email?.message}
+              returnKeyType="go"
+              onSubmitEditing={() => void handleSubmit(onSubmit)()}
             />
           )}
         />
+      )}
 
-        {error ? <InlineAlert tone="danger" message={error} /> : null}
+      {!issued ? (
+        <Button
+          label="Send reset code"
+          onPress={() => void handleSubmit(onSubmit)()}
+          isLoading={isSubmitting}
+          fullWidth
+          size="lg"
+        />
+      ) : null}
 
-        <Button label="Send reset link" onPress={onSubmit} isLoading={isPending} fullWidth />
-
-        <AppText variant="caption" align="center" color={colors.textMuted}>
-          For your security we show the same confirmation whether or not the address is registered.
-        </AppText>
-      </View>
+      <Button
+        label="Resend code"
+        variant="ghost"
+        size="sm"
+        onPress={() => {
+          setIssued(null);
+          setFormError(null);
+          void handleSubmit(onSubmit)();
+        }}
+        disabled={!getValues('email')}
+      />
     </AuthShell>
   );
 }
 
 const styles = StyleSheet.create({
-  form: { gap: spacing.lg },
+  codeBox: {
+    gap: spacing.sm,
+    padding: spacing.lg,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.successSoftBorder,
+    backgroundColor: colors.successSoft,
+  },
+  codeHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  code: { letterSpacing: 8, marginVertical: spacing.sm },
 });

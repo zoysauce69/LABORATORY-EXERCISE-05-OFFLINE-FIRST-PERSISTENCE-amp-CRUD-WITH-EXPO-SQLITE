@@ -1,616 +1,222 @@
-import { useMemo, useState } from 'react';
+import { forwardRef, useState, type ReactNode } from 'react';
 import {
   Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Switch,
-  Text,
   TextInput,
   View,
   type KeyboardTypeOptions,
   type StyleProp,
-  type TextInputProps,
   type ViewStyle,
 } from 'react-native';
-import { Controller, type Control, type FieldValues, type Path } from 'react-hook-form';
 
 import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 
 import { AppText } from '@/components/ui';
-import type { IconName } from '@/constants/options';
-import { colors, hitSlop, layout, radii, spacing } from '@/theme';
+import { colors, hitSlop, layout, palette, radii, spacing } from '@/theme';
+import type { IconName } from '@/lib/types';
 
-interface FieldShellProps {
-  label?: string;
+/* ------------------------------------------------------------------ */
+/* Field wrapper                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Label + control + message, shared by every field below.
+ *
+ * Renders exactly one message: the error if there is one, otherwise the hint.
+ * Showing both at once contradicts itself on a form this small.
+ */
+export function FieldShell({
+  label,
+  error,
+  hint,
+  required,
+  children,
+  style,
+}: {
+  label: string;
   error?: string | undefined;
-  hint?: string | undefined;
+  hint?: string;
   required?: boolean;
-  children: React.ReactNode;
+  children: ReactNode;
   style?: StyleProp<ViewStyle>;
-}
-
-function FieldShell({ label, error, hint, required, children, style }: FieldShellProps) {
+}) {
   return (
-    <View style={[{ gap: spacing.xs }, style]}>
-      {label ? (
-        <AppText variant="captionStrong">
+    <View style={[styles.field, style]}>
+      <View style={styles.labelRow}>
+        <AppText variant="captionStrong" color={colors.textSecondary}>
           {label}
-          {required ? <AppText variant="captionStrong" color={colors.danger}> *</AppText> : null}
         </AppText>
-      ) : null}
+        {required ? (
+          <AppText variant="caption" color={colors.danger}>
+            Required
+          </AppText>
+        ) : null}
+      </View>
       {children}
       {error ? (
-        <View style={styles.fieldMessage}>
+        <View style={styles.messageRow}>
           <Ionicons name="alert-circle" size={13} color={colors.danger} />
-          <AppText variant="caption" color={colors.danger} style={{ flex: 1 }}>
+          <AppText variant="caption" color={colors.danger} style={styles.messageText}>
             {error}
           </AppText>
         </View>
       ) : hint ? (
-        <AppText variant="caption">{hint}</AppText>
+        <AppText variant="caption" color={colors.textMuted}>
+          {hint}
+        </AppText>
       ) : null}
     </View>
   );
 }
 
-/**
- * Contract shared by every field that registers itself with React Hook Form.
- *
- * Both members are generic so a screen cannot hand a field a name that does not
- * exist on its form values, which removes the need to cast the name.
- */
-export interface BoundFieldProps<TFieldValues extends FieldValues> {
-  /** The form instance the field registers with. */
-  control: Control<TFieldValues>;
-  /** Dotted path of the field inside the form values. */
-  name: Path<TFieldValues>;
+/** The bordered box a control sits in. Shared so every field lines up. */
+function controlShell(error: string | undefined, pressed = false) {
+  return [
+    styles.control,
+    error ? styles.controlError : null,
+    pressed ? styles.controlPressed : null,
+  ];
 }
 
 /* ------------------------------------------------------------------ */
-/* Text input                                                           */
+/* Text input                                                         */
 /* ------------------------------------------------------------------ */
 
-export interface TextFieldProps<TFieldValues extends FieldValues>
-  extends BoundFieldProps<TFieldValues>,
-    Omit<TextInputProps, 'style'> {
-  label?: string;
+interface TextFieldProps {
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
   error?: string | undefined;
-  hint?: string | undefined;
+  hint?: string;
+  placeholder?: string;
   required?: boolean;
   icon?: IconName;
-  containerStyle?: StyleProp<ViewStyle>;
-  /** Renders the prefix, e.g. "₱" for money fields. */
+  /** Static text rendered inside the control, before the input. e.g. "₱". */
   prefix?: string;
+  secureTextEntry?: boolean;
+  keyboardType?: KeyboardTypeOptions;
+  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
+  autoCorrect?: boolean;
+  multiline?: boolean;
+  maxLength?: number;
+  editable?: boolean;
+  /** Wired to react-hook-form so a field is only marked touched once left. */
+  onBlur?: () => void;
+  onFocus?: () => void;
+  onSubmitEditing?: () => void;
+  returnKeyType?: 'next' | 'done' | 'go' | 'search';
+  testID?: string;
 }
 
-export function TextField<TFieldValues extends FieldValues>({
-  name,
-  control,
-  label,
-  error,
-  hint,
-  required,
-  icon,
-  containerStyle,
-  prefix,
-  multiline,
-  ...rest
-}: TextFieldProps<TFieldValues>) {
-  const [focused, setFocused] = useState(false);
-
-  return (
-    <FieldShell label={label} error={error} hint={hint} required={required} style={containerStyle}>
-      <Controller
-        control={control}
-        name={name}
-        render={({ field: { onChange, onBlur, value } }) => (
-          <View
-            style={[
-              styles.inputContainer,
-              multiline && styles.inputContainerMultiline,
-              focused && styles.inputContainerFocused,
-              error ? styles.inputContainerError : null,
-            ]}
-          >
-            {icon ? (
-              <Ionicons
-                name={icon}
-                size={17}
-                color={focused ? colors.primary : colors.textMuted}
-                style={{ marginRight: spacing.sm }}
-              />
-            ) : null}
-            {prefix ? (
-              <AppText variant="body" color={colors.textMuted} style={{ marginRight: 4 }}>
-                {prefix}
-              </AppText>
-            ) : null}
-            <TextInput
-              value={value === null || value === undefined ? '' : String(value)}
-              onChangeText={onChange}
-              onBlur={() => {
-                setFocused(false);
-                onBlur();
-              }}
-              onFocus={() => setFocused(true)}
-              multiline={multiline}
-              placeholderTextColor={colors.textMuted}
-              accessibilityLabel={label ?? name}
-              accessibilityHint={hint}
-              style={[styles.input, multiline && styles.inputMultiline]}
-              {...rest}
-            />
-          </View>
-        )}
-      />
-    </FieldShell>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Password input                                                       */
-/* ------------------------------------------------------------------ */
-
-export function PasswordField<TFieldValues extends FieldValues>({
-  name,
-  control,
-  label,
-  error,
-  hint,
-  required,
-  ...rest
-}: TextFieldProps<TFieldValues>) {
-  const [visible, setVisible] = useState(false);
-
+export const TextField = forwardRef<TextInput, TextFieldProps>(function TextField(
+  {
+    label,
+    value,
+    onChangeText,
+    error,
+    hint,
+    placeholder,
+    required,
+    icon,
+    prefix,
+    secureTextEntry,
+    keyboardType,
+    autoCapitalize = 'none',
+    autoCorrect = false,
+    multiline,
+    maxLength,
+    editable = true,
+    onBlur,
+    onFocus,
+    onSubmitEditing,
+    returnKeyType,
+    testID,
+  },
+  ref,
+) {
   return (
     <FieldShell label={label} error={error} hint={hint} required={required}>
-      <Controller
-        control={control}
-        name={name}
-        render={({ field: { onChange, onBlur, value } }) => (
-          <View style={[styles.inputContainer, error ? styles.inputContainerError : null]}>
-            <Ionicons name="lock-closed-outline" size={17} color={colors.textMuted} style={{ marginRight: spacing.sm }} />
-            <TextInput
-              value={value === null || value === undefined ? '' : String(value)}
-              onChangeText={onChange}
-              onBlur={onBlur}
-              secureTextEntry={!visible}
-              placeholderTextColor={colors.textMuted}
-              accessibilityLabel={label ?? name}
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={[styles.input, styles.inputWithButton]}
-              {...rest}
-            />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={visible ? 'Hide password' : 'Show password'}
-              onPress={() => setVisible((v) => !v)}
-              hitSlop={hitSlop}
-            >
-              <Ionicons name={visible ? 'eye-off-outline' : 'eye-outline'} size={19} color={colors.textMuted} />
-            </Pressable>
-          </View>
-        )}
-      />
-    </FieldShell>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Select / option row                                                  */
-/* ------------------------------------------------------------------ */
-
-export interface SelectOption<T extends string> {
-  value: T;
-  label: string;
-}
-
-export function SelectField<T extends string, TFieldValues extends FieldValues = FieldValues>({
-  name,
-  control,
-  label,
-  options,
-  error,
-  hint,
-  required,
-  placeholder = 'Select an option',
-  onOpenPicker,
-}: BoundFieldProps<TFieldValues> & {
-  label?: string;
-  options: SelectOption<T>[];
-  error?: string | undefined;
-  hint?: string | undefined;
-  required?: boolean;
-  placeholder?: string;
-  /** When supplied the row is treated as a launcher instead of a plain display. */
-  onOpenPicker?: () => void;
-}) {
-  return (
-    <FieldShell label={label} error={error} hint={hint} required={required}>
-      <Controller
-        control={control}
-        name={name}
-        render={({ field: { onChange, value } }) => {
-          // Compared as strings because the form value arrives as an indexed
-          // access type, not as the literal union the options are built from.
-          const selected = options.find((option) => option.value === String(value));
-          return (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`${label ?? name}: ${selected?.label ?? placeholder}`}
-              onPress={onOpenPicker}
-              style={[styles.inputContainer, error ? styles.inputContainerError : null]}
-            >
-              <Text style={[styles.input, !selected && { color: colors.textMuted }]}>
-                {selected?.label ?? placeholder}
-              </Text>
-              <Ionicons name="chevron-down" size={17} color={colors.textMuted} />
-            </Pressable>
-          );
-        }}
-      />
-    </FieldShell>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Switch field                                                         */
-/* ------------------------------------------------------------------ */
-
-export function SwitchField<TFieldValues extends FieldValues>({
-  name,
-  control,
-  label,
-  description,
-  hint,
-  error,
-}: BoundFieldProps<TFieldValues> & {
-  label: string;
-  description?: string;
-  hint?: string;
-  /** Needed for consent switches where "on" is the only valid submission. */
-  error?: string | undefined;
-}) {
-  return (
-    <Controller
-      control={control}
-      name={name}
-      render={({ field: { onChange, value } }) => (
-        <View>
-          <View style={styles.switchRow}>
-            <View style={{ flex: 1, paddingRight: spacing.md }}>
-              <AppText variant="bodyStrong">{label}</AppText>
-              {description ? <AppText variant="caption">{description}</AppText> : null}
-            </View>
-            <Switch
-              value={Boolean(value)}
-              onValueChange={onChange}
-              accessibilityLabel={label}
-              accessibilityHint={hint ?? description}
-              trackColor={{ false: colors.border, true: colors.primarySoft }}
-              thumbColor={value ? colors.primary : colors.surface}
-            />
-          </View>
-          {error ? (
-            <View style={styles.fieldMessage}>
-              <Ionicons name="alert-circle" size={13} color={colors.danger} />
-              <AppText variant="caption" color={colors.danger} style={{ flex: 1 }}>
-                {error}
-              </AppText>
-            </View>
-          ) : null}
-        </View>
-      )}
-    />
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Date field                                                           */
-/* ------------------------------------------------------------------ */
-
-export function DateField<TFieldValues extends FieldValues>({
-  name,
-  control,
-  label,
-  error,
-  hint,
-  required,
-  onPress,
-  displayValue,
-  minimumDate,
-}: BoundFieldProps<TFieldValues> & {
-  label?: string;
-  error?: string | undefined;
-  hint?: string | undefined;
-  required?: boolean;
-  onPress: () => void;
-  displayValue: string;
-  minimumDate?: Date;
-}) {
-  return (
-    <FieldShell label={label} error={error} hint={hint} required={required}>
-      <Controller
-        control={control}
-        name={name}
-        render={({ field: { onChange, value } }) => (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${label ?? String(name)}: ${displayValue}`}
-            onPress={onPress}
-            style={[styles.inputContainer, error ? styles.inputContainerError : null]}
-          >
-            <Ionicons name="calendar-outline" size={17} color={colors.textMuted} style={{ marginRight: spacing.sm }} />
-            <Text style={[styles.input, !value && { color: colors.textMuted }]}>{displayValue}</Text>
-            <Ionicons name="chevron-down" size={17} color={colors.textMuted} />
-          </Pressable>
-        )}
-      />
-      {minimumDate ? <View pointerEvents="none" style={{ height: 0 }} /> : null}
-    </FieldShell>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Segmented control                                                    */
-/* ------------------------------------------------------------------ */
-
-export function SegmentedField<T extends string, TFieldValues extends FieldValues = FieldValues>({
-  name,
-  control,
-  label,
-  options,
-  error,
-  hint,
-}: BoundFieldProps<TFieldValues> & {
-  label?: string;
-  options: SelectOption<T>[];
-  error?: string | undefined;
-  hint?: string | undefined;
-}) {
-  return (
-    <FieldShell label={label} error={error} hint={hint}>
-      <Controller
-        control={control}
-        name={name}
-        render={({ field: { onChange, value } }) => (
-          <View style={styles.segmented} accessibilityRole="radiogroup">
-            {options.map((option) => {
-              const active = option.value === String(value);
-              return (
-                <Pressable
-                  key={option.value}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: active }}
-                  accessibilityLabel={option.label}
-                  onPress={() => onChange(option.value)}
-                  style={[styles.segment, active && styles.segmentActive]}
-                >
-                  <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]} numberOfLines={1}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
-      />
-    </FieldShell>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Slider-ish stepper for 1-5 scales                                   */
-/* ------------------------------------------------------------------ */
-
-export function ScaleField<TFieldValues extends FieldValues>({
-  name,
-  control,
-  label,
-  options,
-  error,
-  hint,
-}: BoundFieldProps<TFieldValues> & {
-  label?: string;
-  options: { value: number; label: string }[];
-  error?: string | undefined;
-  hint?: string | undefined;
-}) {
-  return (
-    <FieldShell label={label} error={error} hint={hint}>
-      <Controller
-        control={control}
-        name={name}
-        render={({ field: { onChange, value } }) => (
-          <View style={styles.scaleRow}>
-            {options.map((option) => {
-              const active = option.value === Number(value);
-              return (
-                <Pressable
-                  key={option.value}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: active }}
-                  accessibilityLabel={option.label}
-                  onPress={() => onChange(option.value)}
-                  style={[styles.scaleDot, active && styles.scaleDotActive]}
-                >
-                  <Text style={[styles.scaleLabel, active && styles.scaleLabelActive]}>{option.value}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
-      />
-    </FieldShell>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Photo picker field                                                   */
-/* ------------------------------------------------------------------ */
-
-export function PhotoPickerField({
-  photos,
-  onAddFromLibrary,
-  onTakePhoto,
-  onRemove,
-  isUploading,
-  error,
-  maxPhotos = 8,
-}: {
-  photos: { id: string; url: string | null; isLocal?: boolean }[];
-  onAddFromLibrary: () => void;
-  onTakePhoto: () => void;
-  onRemove: (id: string) => void;
-  isUploading?: boolean;
-  error?: string | undefined;
-  maxPhotos?: number;
-}) {
-  const isFull = photos.length >= maxPhotos;
-
-  return (
-    <FieldShell
-      label="Photos"
-      error={error}
-      hint={isFull ? `Maximum of ${maxPhotos} photos.` : 'Add at least one clear photo of the unit.'}
-    >
-      <View style={styles.photoGrid}>
-        {photos.map((photo) => (
-          <View key={photo.id} style={styles.photoCell}>
-            {photo.url ? (
-              <Image
-                source={{ uri: photo.url }}
-                style={styles.photoImage}
-                contentFit="cover"
-                transition={120}
-                accessibilityLabel={`Property photo ${photos.indexOf(photo) + 1}`}
-              />
-            ) : (
-              <View style={[styles.photoImage, styles.photoPlaceholder]}>
-                <Ionicons name="image-outline" size={20} color={colors.textMuted} />
-              </View>
-            )}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Remove photo"
-              onPress={() => onRemove(photo.id)}
-              style={styles.photoRemove}
-              hitSlop={hitSlop}
-            >
-              <Ionicons name="close" size={14} color={colors.textInverse} />
-            </Pressable>
-          </View>
-        ))}
-
-        {!isFull ? (
-          <View style={{ gap: spacing.sm }}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Add photos from library"
-              onPress={onAddFromLibrary}
-              style={styles.photoAdd}
-            >
-              <Ionicons name="images-outline" size={20} color={colors.primary} />
-              <Text style={styles.photoAddLabel}>Library</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Take a photo with the camera"
-              onPress={onTakePhoto}
-              style={styles.photoAdd}
-            >
-              <Ionicons name="camera-outline" size={20} color={colors.primary} />
-              <Text style={styles.photoAddLabel}>Camera</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {isUploading ? (
-          <View style={styles.photoUploading}>
-            <Ionicons name="cloud-upload-outline" size={18} color={colors.primary} />
-            <Text style={styles.photoUploadingLabel}>Uploading…</Text>
-          </View>
-        ) : null}
-      </View>
-    </FieldShell>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Standalone (non-form) inputs                                         */
-/* ------------------------------------------------------------------ */
-
-/**
- * Controlled input that is not bound to React Hook Form.
- *
- * Used by the filter sheet, which keeps a plain draft object rather than a
- * form instance. Same look as TextField so the UI stays consistent.
- */
-export function PlainTextField({
-  label,
-  value,
-  onChangeText,
-  error,
-  hint,
-  required,
-  icon,
-  prefix,
-  multiline,
-  containerStyle,
-  ...rest
-}: Omit<TextFieldProps<FieldValues>, 'name' | 'control'> & {
-  label?: string | undefined;
-  error?: string | undefined;
-  hint?: string | undefined;
-  icon?: IconName | undefined;
-  prefix?: string | undefined;
-  containerStyle?: StyleProp<ViewStyle> | undefined;
-}) {
-  const [focused, setFocused] = useState(false);
-
-  return (
-    <FieldShell label={label} error={error} hint={hint} required={required} style={containerStyle}>
-      <View
-        style={[
-          styles.inputContainer,
-          multiline && styles.inputContainerMultiline,
-          focused && styles.inputContainerFocused,
-          error ? styles.inputContainerError : null,
-        ]}
-      >
+      <View style={controlShell(error)}>
         {icon ? (
           <Ionicons
             name={icon}
-            size={17}
-            color={focused ? colors.primary : colors.textMuted}
-            style={{ marginRight: spacing.sm }}
+            size={18}
+            color={error ? colors.danger : colors.textMuted}
           />
         ) : null}
         {prefix ? (
-          <AppText variant="body" color={colors.textMuted} style={{ marginRight: 4 }}>
+          <AppText variant="body" color={colors.textSecondary}>
             {prefix}
           </AppText>
         ) : null}
         <TextInput
+          ref={ref}
+          testID={testID}
           value={value}
           onChangeText={onChangeText}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          multiline={multiline}
+          placeholder={placeholder}
           placeholderTextColor={colors.textMuted}
+          secureTextEntry={secureTextEntry}
+          keyboardType={keyboardType}
+          autoCapitalize={autoCapitalize}
+          autoCorrect={autoCorrect}
+          multiline={multiline}
+          maxLength={maxLength}
+          editable={editable}
+          onBlur={onBlur}
+          onFocus={onFocus}
+          onSubmitEditing={onSubmitEditing}
+          returnKeyType={returnKeyType}
           accessibilityLabel={label}
-          style={[styles.input, multiline && styles.inputMultiline]}
-          {...rest}
+          accessibilityHint={hint}
+          style={[
+            styles.input,
+            multiline ? styles.inputMultiline : null,
+            editable ? null : styles.inputDisabled,
+          ]}
         />
       </View>
     </FieldShell>
   );
+});
+
+/* ------------------------------------------------------------------ */
+/* Select                                                             */
+/* ------------------------------------------------------------------ */
+
+export interface SelectOption<T extends string | number> {
+  value: T;
+  label: string;
+  description?: string;
 }
 
-export function PlainSelectField<T extends string>({
+interface SelectFieldProps<T extends string | number> {
+  label: string;
+  value: T | null;
+  options: SelectOption<T>[];
+  onChange: (value: T) => void;
+  placeholder?: string;
+  error?: string | undefined;
+  hint?: string;
+  required?: boolean;
+  /**
+   * Adds an explicit "Any" row that clears the selection. Requires `onChange`
+   * to accept `null`, so it is separate from the required `onChange`.
+   */
+  onClear?: () => void;
+  testID?: string;
+}
+
+/**
+ * A picker that opens a bottom sheet.
+ *
+ * A sheet rather than an inline dropdown so long option lists (cities, budget
+ * bands) stay scrollable and tap targets stay at full width.
+ */
+export function SelectField<T extends string | number>({
   label,
   value,
   options,
@@ -619,147 +225,315 @@ export function PlainSelectField<T extends string>({
   error,
   hint,
   required,
-  searchable = false,
-}: {
-  label?: string;
-  value: T;
-  options: SelectOption<T>[];
-  onChange: (value: T) => void;
-  placeholder?: string;
-  error?: string | undefined;
-  hint?: string | undefined;
-  required?: boolean;
-  /** Adds a search box — needed for long lists such as barangays. */
-  searchable?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
+  onClear,
+  testID,
+}: SelectFieldProps<T>) {
+  const [isOpen, setIsOpen] = useState(false);
   const selected = options.find((option) => option.value === value);
-
-  const visibleOptions = useMemo(() => {
-    if (!searchable || query.trim() === '') return options;
-    const needle = query.trim().toLowerCase();
-    return options.filter((option) => option.label.toLowerCase().includes(needle));
-  }, [options, query, searchable]);
-
-  const choose = (next: T) => {
-    onChange(next);
-    setOpen(false);
-    setQuery('');
-  };
 
   return (
     <FieldShell label={label} error={error} hint={hint} required={required}>
       <Pressable
+        testID={testID}
         accessibilityRole="button"
-        accessibilityLabel={`${label ?? 'Select'}: ${selected?.label ?? placeholder}`}
+        accessibilityLabel={`${label}. ${selected?.label ?? placeholder}`}
         accessibilityHint="Opens a list of options"
-        onPress={() => setOpen(true)}
-        style={[styles.inputContainer, error ? styles.inputContainerError : null]}
+        onPress={() => setIsOpen(true)}
+        style={({ pressed }) => controlShell(error, pressed)}
       >
-        <Text style={[styles.input, !selected && { color: colors.textMuted }]} numberOfLines={1}>
+        <AppText
+          variant="body"
+          color={selected ? colors.text : colors.textMuted}
+          numberOfLines={1}
+          style={styles.selectValue}
+        >
           {selected?.label ?? placeholder}
-        </Text>
-        <Ionicons name="chevron-down" size={17} color={colors.textMuted} />
+        </AppText>
+        <Ionicons name="chevron-down" size={18} color={colors.textMuted} />
       </Pressable>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+      <Modal
+        visible={isOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setIsOpen(false)}
+      >
         <Pressable
-          accessibilityRole="button"
+          style={styles.scrim}
+          onPress={() => setIsOpen(false)}
           accessibilityLabel="Close options"
-          style={styles.pickerBackdrop}
-          onPress={() => setOpen(false)}
-        >
-          <Pressable style={styles.pickerSheet} onPress={(event) => event.stopPropagation()}>
-            <View style={styles.pickerHeader}>
-              <AppText variant="subheading">{label ?? 'Select an option'}</AppText>
+        />
+        <View style={styles.sheet}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <AppText variant="subheading" accessibilityRole="header">
+              {label}
+            </AppText>
+            <Pressable
+              onPress={() => setIsOpen(false)}
+              hitSlop={hitSlop}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+            >
+              <Ionicons name="close" size={22} color={colors.textSecondary} />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.sheetList}>
+            {onClear ? (
               <Pressable
+                onPress={() => {
+                  onClear();
+                  setIsOpen(false);
+                }}
                 accessibilityRole="button"
-                accessibilityLabel="Close options"
-                onPress={() => setOpen(false)}
-                hitSlop={hitSlop}
+                style={({ pressed }) => [styles.optionRow, pressed && styles.controlPressed]}
               >
-                <Ionicons name="close" size={22} color={colors.text} />
-              </Pressable>
-            </View>
-
-            {searchable ? (
-              <PlainTextField
-                value={query}
-                onChangeText={setQuery}
-                placeholder="Type to filter"
-                icon="search"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            ) : null}
-
-            <ScrollView style={styles.pickerList} keyboardShouldPersistTaps="handled">
-              {visibleOptions.length === 0 ? (
-                <AppText variant="caption" align="center" style={{ paddingVertical: spacing.lg }}>
-                  No option matches “{query}”.
+                <AppText variant="body" color={colors.textMuted}>
+                  Any
                 </AppText>
-              ) : (
-                visibleOptions.map((option) => {
-                  const active = option.value === value;
-                  return (
-                    <Pressable
-                      key={option.value}
-                      accessibilityRole="menuitem"
-                      accessibilityState={{ selected: active }}
-                      accessibilityLabel={option.label}
-                      onPress={() => choose(option.value)}
-                      style={({ pressed }) => [styles.pickerItem, pressed && styles.pickerItemPressed]}
+              </Pressable>
+            ) : null}
+            {options.map((option) => {
+              const isSelected = option.value === value;
+              return (
+                <Pressable
+                  key={String(option.value)}
+                  onPress={() => {
+                    onChange(option.value);
+                    setIsOpen(false);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isSelected }}
+                  accessibilityLabel={option.label}
+                  style={({ pressed }) => [
+                    styles.optionRow,
+                    isSelected ? styles.optionRowSelected : null,
+                    pressed ? styles.controlPressed : null,
+                  ]}
+                >
+                  <View style={styles.optionText}>
+                    <AppText
+                      variant={isSelected ? 'bodyStrong' : 'body'}
+                      color={isSelected ? colors.primary : colors.text}
                     >
-                      <Text
-                        style={[styles.pickerItemLabel, active && { color: colors.primary, fontWeight: '700' }]}
-                        numberOfLines={1}
-                      >
-                        {option.label}
-                      </Text>
-                      {active ? <Ionicons name="checkmark" size={18} color={colors.primary} /> : null}
-                    </Pressable>
-                  );
-                })
-              )}
-            </ScrollView>
-          </Pressable>
-        </Pressable>
+                      {option.label}
+                    </AppText>
+                    {option.description ? (
+                      <AppText variant="caption">{option.description}</AppText>
+                    ) : null}
+                  </View>
+                  {isSelected ? (
+                    <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
       </Modal>
     </FieldShell>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Numeric input with peso handling                                     */
+/* Date field                                                         */
 /* ------------------------------------------------------------------ */
 
-export function MoneyField<TFieldValues extends FieldValues>(props: TextFieldProps<TFieldValues>) {
+/** ISO `YYYY-MM-DD` for a date `days` from today. */
+export function isoDaysFromNow(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function quickPickLabel(days: number): string {
+  if (days === 0) return 'ASAP';
+  if (days % 7 === 0) return `${days / 7} wk`;
+  return `${days}d`;
+}
+
+/**
+ * Move-in date, as a text input plus tappable presets.
+ *
+ * Deliberately not a platform date picker: the presets cover the common case in
+ * one tap and the text field accepts any date, without the dialog behaving
+ * differently across iOS, Android and web. The value is always `YYYY-MM-DD`,
+ * which is what the application schema validates.
+ */
+export function DateField({
+  label,
+  value,
+  onChange,
+  error,
+  hint,
+  required,
+  presets = [0, 7, 14, 30, 60],
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  error?: string | undefined;
+  hint?: string;
+  required?: boolean;
+  presets?: number[];
+}) {
   return (
-    <TextField
-      keyboardType="numeric"
-      inputMode="numeric"
-      returnKeyType="done"
-      prefix="₱"
-      {...props}
-    />
+    <FieldShell
+      label={label}
+      error={error}
+      hint={hint ?? 'YYYY-MM-DD, or tap a preset'}
+      required={required}
+    >
+      <View style={styles.control}>
+        <Ionicons name="calendar-outline" size={18} color={colors.textMuted} />
+        <TextInput
+          value={value}
+          onChangeText={onChange}
+          placeholder="YYYY-MM-DD"
+          placeholderTextColor={colors.textMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          accessibilityLabel={label}
+          style={styles.input}
+        />
+      </View>
+      <View style={styles.presetRow}>
+        {presets.map((days) => {
+          const iso = isoDaysFromNow(days);
+          const isSelected = value === iso;
+          return (
+            <Pressable
+              key={days}
+              onPress={() => onChange(iso)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isSelected }}
+              accessibilityLabel={`Move in ${quickPickLabel(days)} from now`}
+              style={({ pressed }) => [
+                styles.preset,
+                isSelected ? styles.presetSelected : null,
+                pressed ? styles.controlPressed : null,
+              ]}
+            >
+              <AppText
+                variant="captionStrong"
+                color={isSelected ? colors.primary : colors.textSecondary}
+              >
+                {quickPickLabel(days)}
+              </AppText>
+            </Pressable>
+          );
+        })}
+      </View>
+    </FieldShell>
   );
 }
 
-export function NumberField<TFieldValues extends FieldValues>(
-  props: Omit<TextFieldProps<TFieldValues>, 'prefix'> & { keyboardType?: KeyboardTypeOptions },
-) {
-  return <TextField keyboardType="number-pad" inputMode="numeric" {...props} />;
+/* ------------------------------------------------------------------ */
+/* Toggle                                                             */
+/* ------------------------------------------------------------------ */
+
+export function SwitchField({
+  label,
+  description,
+  value,
+  onChange,
+  testID,
+}: {
+  label: string;
+  description?: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+  testID?: string;
+}) {
+  return (
+    <View style={styles.switchRow}>
+      <View style={styles.switchText}>
+        <AppText variant="bodyStrong">{label}</AppText>
+        {description ? <AppText variant="caption">{description}</AppText> : null}
+      </View>
+      <Switch
+        testID={testID}
+        value={value}
+        onValueChange={onChange}
+        accessibilityLabel={label}
+        accessibilityRole="switch"
+        trackColor={{ false: colors.border, true: colors.primary }}
+        thumbColor={palette.white}
+        ios_backgroundColor={colors.border}
+      />
+    </View>
+  );
 }
 
 /* ------------------------------------------------------------------ */
-/* Styles                                                               */
+/* Segmented control                                                  */
+/* ------------------------------------------------------------------ */
+
+export function SegmentedControl<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  error,
+}: {
+  label?: string;
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  error?: string | undefined;
+}) {
+  return (
+    <FieldShell label={label ?? ''} error={error}>
+      <View style={styles.segmented} accessibilityRole="radiogroup">
+        {options.map((option) => {
+          const isSelected = option.value === value;
+          return (
+            <Pressable
+              key={option.value}
+              onPress={() => onChange(option.value)}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: isSelected }}
+              accessibilityLabel={option.label}
+              style={({ pressed }) => [
+                styles.segment,
+                isSelected ? styles.segmentSelected : null,
+                pressed ? styles.controlPressed : null,
+              ]}
+            >
+              <AppText
+                variant="captionStrong"
+                color={isSelected ? colors.primary : colors.textSecondary}
+                align="center"
+              >
+                {option.label}
+              </AppText>
+            </Pressable>
+          );
+        })}
+      </View>
+    </FieldShell>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Styles                                                             */
 /* ------------------------------------------------------------------ */
 
 const styles = StyleSheet.create({
-  inputContainer: {
+  field: { gap: spacing.sm },
+  labelRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  messageRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.xs },
+  messageText: { flex: 1 },
+
+  control: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
     minHeight: layout.inputHeight,
     paddingHorizontal: spacing.md,
     borderRadius: radii.md,
@@ -767,138 +541,96 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.surface,
   },
-  inputContainerMultiline: { minHeight: 120, alignItems: 'flex-start', paddingVertical: spacing.md },
-  inputContainerFocused: { borderColor: colors.primary },
-  inputContainerError: { borderColor: colors.danger },
+  controlError: { borderColor: colors.danger, backgroundColor: colors.dangerSoft },
+  controlPressed: { backgroundColor: colors.surfaceMuted },
 
   input: {
     flex: 1,
     fontSize: 15,
     color: colors.text,
-    paddingVertical: spacing.md,
-    // Web reset so the field does not render with a browser focus ring.
-    // `outlineWidth` rather than `outlineStyle: 'none'`: React Native's style
-    // types only allow solid/dotted/dashed.
-    outlineWidth: 0,
+    // React Native's TextInput cannot have its vertical padding reduced on
+    // Android without zeroing it here and re-adding it via the container's
+    // minHeight.
+    padding: 0,
   },
-  inputMultiline: { minHeight: 96, textAlignVertical: 'top' },
-  inputWithButton: { paddingRight: spacing.sm },
+  inputMultiline: { minHeight: 76, paddingTop: spacing.md, textAlignVertical: 'top' },
+  inputDisabled: { color: colors.textMuted },
+  selectValue: { flex: 1 },
 
-  fieldMessage: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  preset: {
+    paddingHorizontal: spacing.md,
+    minHeight: 34,
+    justifyContent: 'center',
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  presetSelected: { backgroundColor: colors.primarySoft, borderColor: colors.primary },
+
+  scrim: { flex: 1, backgroundColor: colors.overlay },
+  sheet: {
+    maxHeight: '78%',
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radii.xxl,
+    borderTopRightRadius: radii.xxl,
+    paddingBottom: spacing.xxl,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.borderStrong,
+    marginTop: spacing.md,
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+  },
+  sheetList: { paddingHorizontal: spacing.lg, gap: spacing.xs },
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    minHeight: layout.controlHeight,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+  },
+  optionRowSelected: { backgroundColor: colors.primarySoft },
+  optionText: { flex: 1, gap: 2 },
 
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: layout.controlHeight,
-    paddingVertical: spacing.xs,
-  },
-
-  segmented: {
-    flexDirection: 'row',
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radii.md,
-    padding: 3,
-    gap: 3,
-  },
-  segment: {
-    flex: 1,
-    minHeight: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.xs,
-  },
-  segmentActive: {
-    backgroundColor: colors.surface,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.06,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  segmentLabel: { fontSize: 13, color: colors.textSecondary },
-  segmentLabelActive: { color: colors.primary, fontWeight: '700' },
-
-  scaleRow: { flexDirection: 'row', gap: spacing.sm },
-  scaleDot: {
-    flex: 1,
-    aspectRatio: 1,
-    maxHeight: 48,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
-  },
-  scaleDotActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  scaleLabel: { fontSize: 15, color: colors.textSecondary, fontWeight: '600' },
-  scaleLabelActive: { color: colors.textInverse },
-
-  photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  photoCell: { width: 88, height: 88, borderRadius: radii.md, overflow: 'hidden' },
-  photoImage: { width: '100%', height: '100%' },
-  photoPlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceMuted },
-  photoRemove: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: 'rgba(15,23,42,0.75)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  photoAdd: {
-    width: 88,
-    height: 40,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: colors.borderStrong,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
-  },
-  photoAddLabel: { fontSize: 10, color: colors.primary, fontWeight: '600' },
-  photoUploading: {
-    width: 88,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
-  },
-  photoUploadingLabel: { fontSize: 10, color: colors.primary },
-
-  pickerBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.45)',
-    justifyContent: 'center',
-    padding: spacing.lg,
-  },
-  pickerSheet: {
-    maxHeight: '80%',
-    backgroundColor: colors.surface,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  pickerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  pickerList: { flexGrow: 0 },
-  pickerItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     gap: spacing.md,
     minHeight: layout.controlHeight,
     paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.divider,
   },
-  pickerItemPressed: { backgroundColor: colors.surfaceMuted },
-  pickerItemLabel: { flex: 1, fontSize: 15, color: colors.text },
+  switchText: { flex: 1, gap: 2 },
+
+  segmented: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    padding: spacing.xs,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radii.md,
+  },
+  segment: {
+    flex: 1,
+    minHeight: 38,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.sm,
+  },
+  segmentSelected: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.primarySoftBorder,
+  },
 });

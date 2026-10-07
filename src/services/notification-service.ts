@@ -1,145 +1,102 @@
-import { Platform } from 'react-native';
-import * as Device from 'expo-device';
+/**
+ * In-app notifications.
+ *
+ * These are the local counterpart to the notifications screen: application
+ * updates, roommate request outcomes, and new messages. Actions in the app push
+ * to this list as well as mutating their own records, so the bell reflects what
+ * just happened.
+ */
 
-import { DEMO_MODE, effectiveDistanceMode } from '@/lib/config';
-import { DEMO_NOTIFICATIONS } from '@/lib/demo-data';
-import { ok, runCount, runQuery, type Result } from '@/lib/errors';
-import { supabase } from '@/lib/supabase';
-import type { NotificationRow } from '@/lib/database.types';
-import { colors } from '@/theme';
+import { fail, ok, type Result } from '@/lib/errors';
+import { SEED_NOTIFICATIONS } from '@/lib/mock-data';
+import { getNotifications, setNotifications } from '@/lib/storage';
+import type { AppNotification, IconName, NotificationKind } from '@/lib/types';
 
-type NotificationsModule = typeof import('expo-notifications');
+let counter = 0;
 
-let _notifications: NotificationsModule | null = null;
-async function getNotifications(): Promise<NotificationsModule> {
-  if (!_notifications) _notifications = await import('expo-notifications');
-  return _notifications;
+function newId(): string {
+  counter += 1;
+  return `notif-${Date.now().toString(36)}-${counter}`;
 }
 
-let handlerConfigured = false;
+/** Newest first. */
+export async function listNotifications(): Promise<Result<AppNotification[]>> {
+  const result = await getNotifications(SEED_NOTIFICATIONS);
+  if (!result.ok) return fail(result.error.message, result.error.code);
 
-async function configureHandler(): Promise<void> {
-  if (handlerConfigured) return;
-  handlerConfigured = true;
-  const N = await getNotifications();
-  N.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: false,
-      shouldSetBadge: false,
-    }),
-  });
+  const sorted = [...result.data].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+  return ok(sorted);
 }
 
-async function ensureAndroidChannel(): Promise<void> {
-  if (Platform.OS !== 'android') return;
-  const N = await getNotifications();
-  await N.setNotificationChannelAsync('bookings', {
-    name: 'Booking updates',
-    importance: N.AndroidImportance.DEFAULT,
-    vibrationPattern: [0, 200, 100, 200],
-    lightColor: colors.primary,
-  });
+export async function unreadCount(): Promise<Result<number>> {
+  const result = await listNotifications();
+  if (!result.ok) return fail(result.error.message, result.error.code);
+  return ok(result.data.filter((n) => !n.isRead).length);
 }
 
-export const notificationService = {
-  async registerForPush(userId: string): Promise<Result<'granted' | 'denied' | 'unavailable'>> {
-    if (DEMO_MODE || !Device.isDevice) return ok('unavailable');
+export async function markRead(id: string): Promise<Result<true>> {
+  const result = await listNotifications();
+  if (!result.ok) return fail(result.error.message, result.error.code);
 
-    try {
-      await configureHandler();
-      await ensureAndroidChannel();
-      const N = await getNotifications();
+  const target = result.data.find((n) => n.id === id);
+  if (!target || target.isRead) return ok(true);
 
-      const current = await N.getPermissionsAsync();
-      let status = current.status;
-      if (status !== 'granted') {
-        const requested = await N.requestPermissionsAsync();
-        status = requested.status;
-      }
-      if (status !== 'granted') return ok('denied');
+  const written = await setNotifications(
+    result.data.map((n) => (n.id === id ? { ...n, isRead: true } : n)),
+  );
+  if (!written.ok) return fail(written.error.message, written.error.code);
+  return ok(true);
+}
 
-      const token = await N.getExpoPushTokenAsync({
-        projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID,
-      });
+export async function markAllRead(): Promise<Result<number>> {
+  const result = await listNotifications();
+  if (!result.ok) return fail(result.error.message, result.error.code);
 
-      const result = await runQuery('Save push token', () =>
-        supabase.from('push_tokens').upsert(
-          {
-            user_id: userId,
-            token: token.data,
-            platform: Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'unknown',
-          },
-          { onConflict: 'token' },
-        ).select('token'),
-      );
+  const unread = result.data.filter((n) => !n.isRead);
+  if (unread.length === 0) return ok(0);
 
-      if (!result.ok) return ok('unavailable');
-      return ok('granted');
-    } catch {
-      return ok('unavailable');
-    }
-  },
+  const written = await setNotifications(result.data.map((n) => ({ ...n, isRead: true })));
+  if (!written.ok) return fail(written.error.message, written.error.code);
 
-  async unregister(token: string): Promise<Result<true>> {
-    const result = await runQuery('Remove push token', () =>
-      supabase.from('push_tokens').delete().eq('token', token).select('token').single(),
-    );
-    if (!result.ok) return result;
-    return ok(true);
-  },
+  return ok(unread.length);
+}
 
-  diagnostics(): { supported: boolean; distanceMode: string; reason?: string } {
-    return {
-      supported: Device.isDevice,
-      distanceMode: effectiveDistanceMode,
-      reason: Device.isDevice ? undefined : 'Push tokens are only available on a physical device.',
-    };
-  },
-};
+/**
+ * Appends a notification. Called by the application and message services so a
+ * new submission shows up in the bell immediately.
+ */
+export async function notify(input: {
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  href?: string | null;
+}): Promise<Result<AppNotification>> {
+  const notification: AppNotification = {
+    id: newId(),
+    kind: input.kind,
+    title: input.title,
+    body: input.body,
+    isRead: false,
+    createdAt: new Date().toISOString(),
+    href: input.href ?? null,
+  };
 
-export const inAppNotificationService = {
-  async list(userId: string, limit = 50): Promise<Result<NotificationRow[]>> {
-    if (DEMO_MODE) {
-      return ok(DEMO_NOTIFICATIONS.filter((n) => n.user_id === userId).slice(0, limit));
-    }
-    return runQuery('Load notifications', () =>
-      supabase.from('notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(limit),
-    );
-  },
+  const result = await listNotifications();
+  if (!result.ok) return fail(result.error.message, result.error.code);
 
-  async unreadCount(userId: string): Promise<Result<number>> {
-    if (DEMO_MODE) return ok(1);
-    return runCount('Count unread', () =>
-      supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', userId).is('read_at', null),
-    );
-  },
+  const written = await setNotifications([notification, ...result.data]);
+  if (!written.ok) return fail(written.error.message, written.error.code);
 
-  async markRead(notificationId: string): Promise<Result<true>> {
-    if (DEMO_MODE) return ok(true);
-    const result = await runQuery('Mark notification read', () =>
-      supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', notificationId).select('id').single(),
-    );
-    if (!result.ok) return result;
-    return ok(true);
-  },
+  return ok(notification);
+}
 
-  async markAllRead(userId: string): Promise<Result<true>> {
-    if (DEMO_MODE) return ok(true);
-    const result = await runQuery('Mark all read', () =>
-      supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('user_id', userId).is('read_at', null).select('id'),
-    );
-    if (!result.ok) return result;
-    return ok(true);
-  },
-
-  async remove(notificationId: string): Promise<Result<true>> {
-    if (DEMO_MODE) return ok(true);
-    const result = await runQuery('Delete notification', () =>
-      supabase.from('notifications').delete().eq('id', notificationId).select('id').single(),
-    );
-    if (!result.ok) return result;
-    return ok(true);
-  },
+export const NOTIFICATION_META: Record<
+  NotificationKind,
+  { label: string; icon: IconName; tone: 'info' | 'success' | 'warning' | 'neutral' }
+> = {
+  application_update: { label: 'Application', icon: 'document-text-outline', tone: 'success' },
+  roommate_request: { label: 'Roommate', icon: 'people-outline', tone: 'warning' },
+  message: { label: 'Message', icon: 'chatbubbles-outline', tone: 'neutral' },
 };

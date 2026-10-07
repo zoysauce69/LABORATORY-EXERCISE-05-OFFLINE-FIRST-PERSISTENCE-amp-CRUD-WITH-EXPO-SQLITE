@@ -4,26 +4,66 @@
  * Single source of truth for colour, spacing, radii, typography and elevation.
  * Screens and components must not hardcode hex values, pixel sizes or shadows.
  *
- * NOTE ON FIDELITY: these values implement the blue-and-white RoomLink palette
- * described in the product brief. The Figma file was not reachable during
- * implementation (login gated), so exact hex codes, type scale and radii have
- * NOT been matched to the source design. Once design assets are provided, this
- * file is the only place that needs editing.
+ * PROVENANCE
+ * ----------
+ * `sampled` holds exact values read out of the RoomLink design file
+ * (`RoomLink.png`, 1960x1995) by histogram over the rendered pixels. The brand
+ * blue, the navy hero/sidebar panel, the emerald accent and the section tints
+ * are all measured, not eyeballed:
+ *
+ *   #FFFFFF        50.4% of pixels   page background
+ *   #F7F7F7        30.7%             alternating section background
+ *   navy family    ~7%               dark panel, x 0-359, diagonal bottom edge
+ *   #155DFC        n=8801            vivid brand blue (buttons, accents)
+ *   #2563EB        n=8878            secondary blue
+ *   #1976D2        n=5516            deep blue
+ *   #059669        n=71              verified / success
+ *   #A7F3D0        n=88              success tint
+ *
+ * The layout measurement that matters most: the dark navy panel occupies the
+ * left 18.4% of the canvas (360 of 1960 px) and its bottom edge is cut on a
+ * diagonal — y=1472 at x=20 falling to y=798 at x=350. `heroDiagonal` below
+ * reproduces that cut on the landing hero.
  */
 
-/** Brand palette — blue ramp used for primary actions and surfaces. */
+/** Exact swatches sampled from the design file. Do not hand-edit. */
+export const sampled = {
+  page: '#FFFFFF',
+  section: '#F7F7F7',
+
+  primary: '#155DFC',
+  primaryAlt: '#2563EB',
+  deepBlue: '#1976D2',
+  electric: '#1D72FE',
+  midBlue: '#1D72E6',
+
+  navyDeep: '#071224',
+  navyMid: '#0F2A52',
+  navyEdge: '#000819',
+
+  success: '#059669',
+  successSoft: '#A7F3D0',
+
+  tintBlue: '#EFF7FF',
+  borderBlue: '#E6EFF7',
+  tintLavender: '#F7F7FF',
+  tintGreen: '#EFFFF7',
+
+  bronze: '#A5815D',
+} as const;
+
+/** Brand ramp. Steps 200-300 and 600-800 are the sampled blues. */
 export const palette = {
   blue50: '#EFF6FF',
-  blue100: '#DBEAFE',
-  blue200: '#BFDBFE',
-  blue300: '#93C5FD',
-  blue400: '#60A5FA',
-  blue500: '#3B82F6',
-  blue600: '#2563EB',
-  blue700: '#1D4ED8',
-  blue800: '#1E40AF',
-  blue900: '#1E3A8A',
-  blue950: '#172554',
+  blue100: '#DBE9FF',
+  blue200: '#C7DCFF',
+  blue300: sampled.borderBlue,
+  blue400: '#92B1F5',
+  blue500: '#5B8AF0',
+  blue600: sampled.primaryAlt,
+  blue700: sampled.deepBlue,
+  blue800: sampled.primary,
+  blue900: '#0B3E9E',
 
   white: '#FFFFFF',
 
@@ -38,11 +78,15 @@ export const palette = {
   slate800: '#1E293B',
   slate900: '#0F172A',
 
-  green50: '#F0FDF4',
-  green100: '#DCFCE7',
-  green500: '#22C55E',
-  green600: '#16A34A',
-  green700: '#15803D',
+  navy800: '#12294D',
+  navy900: sampled.navyMid,
+  navy950: sampled.navyDeep,
+
+  green50: '#ECFDF5',
+  green100: sampled.successSoft,
+  green500: '#10B981',
+  green600: sampled.success,
+  green700: '#047857',
 
   amber50: '#FFFBEB',
   amber100: '#FEF3C7',
@@ -60,35 +104,49 @@ export const palette = {
   violet100: '#EDE9FE',
   violet600: '#7C3AED',
 
+  bronze: sampled.bronze,
+
   black: '#000000',
 } as const;
 
 export const colors = {
-  /** Primary brand colour — buttons, active tabs, links. */
-  primary: palette.blue700,
-  primaryDark: palette.blue900,
-  primaryPressed: palette.blue800,
-  primaryLight: palette.blue500,
+  /** Primary brand colour — buttons, active tabs, links. Sampled #155DFC. */
+  primary: palette.blue800,
+  /** Raw ramp values that recur across screens. Components read these from here
+   *  rather than reaching into `palette`, so nothing has to know which ramp a
+   *  colour came from. */
+  white: palette.white,
+  amber500: palette.amber500,
+  primaryPressed: palette.blue900,
+  primaryDark: palette.navy950,
+  primaryLight: palette.blue600,
   primarySoft: palette.blue50,
   primarySoftBorder: palette.blue100,
 
   background: palette.white,
-  backgroundSubtle: palette.slate50,
+  backgroundSubtle: sampled.section,
   surface: palette.white,
   surfaceMuted: palette.slate100,
+
+  /** Dark panel used by the landing hero and the app sidebar. */
+  dark: palette.navy950,
+  darkElevated: palette.navy900,
+  darkBorder: palette.navy800,
 
   text: palette.slate900,
   textSecondary: palette.slate600,
   textMuted: palette.slate500,
   textInverse: palette.white,
-  textOnPrimary: palette.white,
+  textOnDark: palette.white,
+  textOnDarkMuted: '#93A7C4',
 
-  border: palette.slate200,
+  border: sampled.borderBlue,
   borderStrong: palette.slate300,
   divider: palette.slate100,
 
   success: palette.green600,
   successSoft: palette.green50,
+  successSoftBorder: palette.green100,
   warning: palette.amber600,
   warningSoft: palette.amber50,
   danger: palette.red600,
@@ -97,10 +155,8 @@ export const colors = {
   infoSoft: palette.blue50,
   accent: palette.violet600,
 
-  /** Scrim behind modals / bottom sheets. */
-  overlay: 'rgba(15, 23, 42, 0.55)',
-  /** Elevation shadow colour. Kept pure black so shadows read as depth, not tint. */
-  shadow: palette.black,
+  overlay: 'rgba(7, 18, 36, 0.62)',
+  shadow: palette.slate900,
   skeleton: palette.slate200,
   skeletonHighlight: palette.slate100,
 } as const;
@@ -213,14 +269,14 @@ export const typography = {
     letterSpacing: 0.8,
     color: colors.textMuted,
   },
-  /** Currency emphasis, e.g. ₱4,500 /mo */
+  /** Currency emphasis, e.g. ₱5,500 /mo */
   price: {
     fontSize: fontSize.xl,
     lineHeight: Math.round(fontSize.xl * lineHeight.tight),
     fontWeight: fontWeight.bold,
     color: colors.primary,
   },
-  /** Roommate compatibility percentage, e.g. 86 */
+  /** Roommate compatibility percentage, e.g. 92 */
   scoreValue: {
     fontSize: fontSize.xl,
     lineHeight: Math.round(fontSize.xl * lineHeight.tight),
@@ -253,8 +309,8 @@ export const shadows = {
     elevation: 8,
   },
   primary: {
-    shadowColor: palette.blue800,
-    shadowOpacity: 0.28,
+    shadowColor: palette.blue900,
+    shadowOpacity: 0.3,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
     elevation: 6,
@@ -274,13 +330,26 @@ export const layout = {
   avatarSm: 32,
   avatarMd: 44,
   avatarLg: 88,
-  propertyImageHeight: 190,
+  roomImageHeight: 190,
   galleryImageHeight: 260,
   maxContentWidth: 640,
 } as const;
 
+/**
+ * The dark panel measured in the design file: left 18.4% of the canvas, bottom
+ * edge cut on a diagonal running from y=1472 at x=20 down to y=798 at x=350.
+ * `hero` uses this to reproduce the cut without a raster asset.
+ */
+export const heroDiagonal = {
+  /** Fraction of the panel width the diagonal spans. */
+  depth: 0.42,
+  /** Panel width as a fraction of total width. */
+  width: 0.184,
+} as const;
+
 export const theme = {
   palette,
+  sampled,
   colors,
   spacing,
   radii,
@@ -292,6 +361,7 @@ export const theme = {
   hitSlop,
   minTouchTarget,
   layout,
+  heroDiagonal,
 } as const;
 
 export type Theme = typeof theme;

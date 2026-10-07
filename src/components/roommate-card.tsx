@@ -3,218 +3,166 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Ionicons } from '@expo/vector-icons';
 
-import { AppText, Avatar, Badge, Button, Card } from '@/components/ui';
-import {
-  CLEANLINESS_LABELS,
-  DRINKING_OPTIONS,
-  GUEST_OPTIONS,
-  PET_OPTIONS,
-  SLEEP_SCHEDULE_OPTIONS,
-  SMOKING_OPTIONS,
-  STUDY_HABIT_OPTIONS,
-  cleanlinessLabel,
-} from '@/constants/options';
-import type { RoommateMatchResult } from '@/lib/database.types';
-import { formatDate, formatPeso, humaniseToken } from '@/utils/format';
-import { colors, radii, spacing } from '@/theme';
+import { AppText, Avatar, Badge, Card } from '@/components/ui';
+import { colors, layout, radii, spacing } from '@/theme';
+import { lifestyleSummary } from '@/constants/options';
+import { formatPesoRange, formatRelativeFuture } from '@/utils/format';
+import type { MatchKind, Roommate } from '@/lib/types';
 
-export interface RoommateCardProps {
-  match: RoommateMatchResult;
-  onOpen: () => void;
-  onRequest?: (() => void) | undefined;
-  onToggleSave?: (() => void) | undefined;
-  /** True when a request already exists in either direction. */
-  hasRequest?: boolean;
+interface RoommateCardProps {
+  roommate: Roommate;
+  onPress: () => void;
+  onToggleSave?: () => void;
   isSaved?: boolean;
-  isPending?: boolean;
+  onMessage?: () => void;
+  /** Width for the landing page rail. Undefined means full width. */
+  width?: number;
+  testID?: string;
 }
 
-/** Turns an enum token into a short label, or hides it when not shared. */
-function preferenceLabel(
-  value: string | null,
-  options: { value: string; label: string }[],
-): string | null {
-  if (!value || value === 'no_preference') return null;
-  return options.find((option) => option.value === value)?.label ?? humaniseToken(value);
-}
+const MATCH_TONE: Record<MatchKind, 'success' | 'warning' | 'danger'> = {
+  match: 'success',
+  near: 'warning',
+  mismatch: 'danger',
+};
 
-function matchTone(kind: 'match' | 'near' | 'difference') {
-  if (kind === 'match') return 'success' as const;
-  if (kind === 'near') return 'warning' as const;
-  return 'neutral' as const;
-}
+const MATCH_ICON: Record<MatchKind, 'checkmark-circle' | 'ellipse-outline' | 'close-circle'> = {
+  match: 'checkmark-circle',
+  near: 'ellipse-outline',
+  mismatch: 'close-circle',
+};
 
 /**
- * Candidate card for the Roommates tab.
+ * A roommate, scored against the signed-in profile.
  *
- * Every field rendered here comes from the consent projection in
- * `search_roommates`, so anything that person chose not to share is simply
- * absent and the card renders without it.
+ * The compatibility percentage leads because it is the reason this person
+ * surfaced at all, and the top two match reasons are shown rather than hidden,
+ * so the score is explainable instead of magic.
  */
 function RoommateCardComponent({
-  match,
-  onOpen,
-  onRequest,
+  roommate,
+  onPress,
   onToggleSave,
-  hasRequest = false,
   isSaved = false,
-  isPending = false,
+  onMessage,
+  width,
+  testID,
 }: RoommateCardProps) {
-  const traits = [
-    preferenceLabel(match.smoking_preference, SMOKING_OPTIONS),
-    preferenceLabel(match.drinking_preference, DRINKING_OPTIONS),
-    preferenceLabel(match.pets_preference, PET_OPTIONS),
-    preferenceLabel(match.guests_preference, GUEST_OPTIONS),
-    preferenceLabel(match.study_habits, STUDY_HABIT_OPTIONS),
-    preferenceLabel(match.sleep_schedule, SLEEP_SCHEDULE_OPTIONS),
-    match.cleanliness ? CLEANLINESS_LABELS[match.cleanliness] ?? null : null,
-  ].filter((trait): trait is string => Boolean(trait));
-
-  const budgetLabel =
-    match.budget_max !== null
-      ? `${formatPeso(match.budget_min)} – ${formatPeso(match.budget_max)}`
-      : match.budget_min !== null
-        ? `Up to ${formatPeso(match.budget_min)}`
-        : null;
-
-  const requestBlocked = hasRequest || match.request_status !== null;
+  const topReasons = roommate.matchReasons.filter((r) => r.kind === 'match').slice(0, 2);
+  const topMismatch = roommate.matchReasons.find((r) => r.kind === 'mismatch');
 
   return (
     <Card
-      onPress={onOpen}
-      accessibilityLabel={`${match.full_name}, ${match.compatibility_score} percent compatible`}
+      onPress={onPress}
+      style={width ? { width } : undefined}
+      accessibilityLabel={`${roommate.fullName}, ${roommate.compatibilityScore}% compatible`}
       accessibilityHint="Opens the roommate profile"
-      style={styles.card}
-      testID={`roommate-card-${match.roommate_profile_id}`}
+      testID={testID ?? `roommate-card-${roommate.id}`}
     >
-      <View style={styles.header}>
-        <Avatar name={match.full_name} uri={match.avatar_url} size={48} />
+      <View style={styles.body}>
+        <View style={styles.headerRow}>
+          <Avatar uri={roommate.avatarUrl} name={roommate.fullName} size={layout.avatarMd} verified={roommate.verified} />
+          <View style={styles.headerText}>
+            <View style={styles.nameRow}>
+              <AppText variant="subheading" numberOfLines={1}>
+                {roommate.fullName}
+              </AppText>
+            </View>
+            <AppText variant="caption" numberOfLines={1}>
+              {roommate.schoolOrWork}
+            </AppText>
+          </View>
+          {onToggleSave ? (
+            <Pressable
+              onPress={onToggleSave}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isSaved }}
+              accessibilityLabel={isSaved ? 'Remove from saved' : `Save ${roommate.fullName}`}
+              style={({ pressed }) => [styles.saveButton, pressed && styles.saveButtonPressed]}
+            >
+              <Ionicons
+                name={isSaved ? 'heart' : 'heart-outline'}
+                size={20}
+                color={isSaved ? colors.primary : colors.textMuted}
+              />
+            </Pressable>
+          ) : null}
+        </View>
 
-        <View style={styles.headerText}>
-          <AppText variant="subheading" numberOfLines={1}>
-            {match.full_name}
-          </AppText>
-          <AppText variant="caption" numberOfLines={1}>
-            {match.headline ?? 'Looking for a roommate'}
+        <View style={styles.scoreRow}>
+          <View style={styles.scoreBlock}>
+            <AppText variant="scoreValue">{roommate.compatibilityScore}%</AppText>
+            <AppText variant="caption">compatible</AppText>
+          </View>
+          <View style={styles.scoreDivider} />
+          <View style={styles.scoreFacts}>
+            <AppText variant="captionStrong">
+              {formatPesoRange(roommate.budgetMin, roommate.budgetMax)}/mo
+            </AppText>
+            <AppText variant="caption">
+              {roommate.preferredCity} · free {formatRelativeFuture(roommate.moveInDate)}
+            </AppText>
+          </View>
+        </View>
+
+        <View style={styles.summaryBox}>
+          <AppText variant="caption" numberOfLines={2}>
+            {lifestyleSummary(roommate.lifestyle)}
           </AppText>
         </View>
 
-        <View style={styles.score}>
-          <AppText variant="scoreValue">{match.compatibility_score}</AppText>
-          <AppText variant="caption" color={colors.textMuted}>
-            match
-          </AppText>
-        </View>
+        {topReasons.length > 0 ? (
+          <View style={styles.reasonList}>
+            {topReasons.map((reason) => (
+              <View key={reason.label} style={styles.reasonRow}>
+                <Ionicons name={MATCH_ICON[reason.kind]} size={14} color={MATCH_TONE[reason.kind] === 'success' ? colors.success : colors.textMuted} />
+                <AppText variant="caption" numberOfLines={1} style={styles.reasonText}>
+                  {reason.detail}
+                </AppText>
+              </View>
+            ))}
+            {topMismatch ? (
+              <View style={styles.reasonRow}>
+                <Ionicons name={MATCH_ICON[topMismatch.kind]} size={14} color={colors.danger} />
+                <AppText variant="caption" numberOfLines={1} style={styles.reasonText} color={colors.textMuted}>
+                  {topMismatch.detail}
+                </AppText>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
 
-        {onToggleSave ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ selected: isSaved, busy: isPending }}
-            accessibilityLabel={isSaved ? 'Remove from saved' : 'Save this roommate'}
-            onPress={onToggleSave}
-            hitSlop={8}
-            style={styles.saveButton}
-          >
-            <Ionicons
-              name={isSaved ? 'bookmark' : 'bookmark-outline'}
-              size={18}
-              color={isSaved ? colors.primary : colors.textMuted}
+        {roommate.requestStatus ? (
+          <View style={styles.statusRow}>
+            <Badge
+              label={
+                roommate.requestStatus === 'approved'
+                  ? 'Connected'
+                  : roommate.requestStatus === 'pending'
+                    ? 'Request sent'
+                    : roommate.requestStatus === 'rejected'
+                      ? 'Declined'
+                      : 'Request cancelled'
+              }
+              tone={roommate.requestStatus === 'approved' ? 'success' : 'warning'}
+              icon="paper-plane"
             />
+          </View>
+        ) : onMessage ? (
+          <Pressable
+            onPress={onMessage}
+            accessibilityRole="button"
+            accessibilityLabel={`Message ${roommate.fullName}`}
+            style={({ pressed }) => [styles.messageButton, pressed && styles.messageButtonPressed]}
+          >
+            <Ionicons name="chatbubble-outline" size={16} color={colors.primary} />
+            <AppText variant="captionStrong" color={colors.primary}>
+              Say hello
+            </AppText>
           </Pressable>
         ) : null}
       </View>
-
-      {match.about ? (
-        <AppText variant="caption" numberOfLines={3}>
-          {match.about}
-        </AppText>
-      ) : null}
-
-      <View style={styles.metaRow}>
-        {budgetLabel ? (
-          <View style={styles.metaItem}>
-            <Ionicons name="wallet-outline" size={14} color={colors.textSecondary} />
-            <AppText variant="caption" numberOfLines={1}>
-              {budgetLabel}/mo
-            </AppText>
-          </View>
-        ) : null}
-
-        {match.preferred_city ? (
-          <View style={styles.metaItem}>
-            <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
-            <AppText variant="caption" numberOfLines={1}>
-              {match.preferred_barangay ? `${match.preferred_barangay}, ` : ''}
-              {match.preferred_city}
-            </AppText>
-          </View>
-        ) : null}
-
-        {match.move_in_date ? (
-          <View style={styles.metaItem}>
-            <Ionicons name="calendar-outline" size={14} color={colors.textSecondary} />
-            <AppText variant="caption">Moving {formatDate(match.move_in_date)}</AppText>
-          </View>
-        ) : null}
-
-        {match.occupation ? (
-          <View style={styles.metaItem}>
-            <Ionicons name="briefcase-outline" size={14} color={colors.textSecondary} />
-            <AppText variant="caption" numberOfLines={1}>
-              {match.occupation}
-            </AppText>
-          </View>
-        ) : null}
-      </View>
-
-      {traits.length > 0 ? (
-        <View style={styles.traitRow}>
-          {traits.slice(0, 4).map((trait) => (
-            <View key={trait} style={styles.trait}>
-              <AppText variant="caption" numberOfLines={1}>
-                {trait}
-              </AppText>
-            </View>
-          ))}
-          {traits.length > 4 ? (
-            <AppText variant="caption" color={colors.textMuted}>
-              +{traits.length - 4}
-            </AppText>
-          ) : null}
-        </View>
-      ) : (
-        <AppText variant="caption" color={colors.textMuted}>
-          {cleanlinessLabel(match.cleanliness) === 'Not set'
-            ? 'Lifestyle preferences are private.'
-            : 'Lifestyle preferences hidden.'}
-        </AppText>
-      )}
-
-      {match.match_reasons.length > 0 ? (
-        <View style={styles.reasons}>
-          {match.match_reasons.slice(0, 3).map((reason) => (
-            <View key={`${reason.kind}-${reason.label}`} style={styles.reason}>
-              <Badge label={reason.label} tone={matchTone(reason.kind)} />
-              <AppText variant="caption" numberOfLines={2} style={{ flex: 1 }}>
-                {reason.detail}
-              </AppText>
-            </View>
-          ))}
-        </View>
-      ) : null}
-
-      {onRequest ? (
-        <Button
-          label={requestBlocked ? 'Request sent' : 'Request to be roommates'}
-          variant={requestBlocked ? 'outline' : 'primary'}
-          size="sm"
-          icon={requestBlocked ? 'checkmark' : 'person-add-outline'}
-          onPress={onRequest}
-          disabled={requestBlocked}
-          isLoading={isPending}
-          fullWidth
-        />
-      ) : null}
     </Card>
   );
 }
@@ -222,27 +170,50 @@ function RoommateCardComponent({
 export const RoommateCard = memo(RoommateCardComponent);
 
 const styles = StyleSheet.create({
-  card: { gap: spacing.sm, padding: spacing.lg },
-  header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  headerText: { flex: 1, gap: 1 },
-  score: { alignItems: 'center', minWidth: 44 },
+  body: { padding: spacing.lg, gap: spacing.md },
+
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  headerText: { flex: 1, gap: 2 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   saveButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.surfaceMuted,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
-  metaItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, maxWidth: '100%' },
-  traitRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.xs },
-  trait: {
-    backgroundColor: colors.surfaceMuted,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    borderRadius: radii.pill,
+  saveButtonPressed: { opacity: 0.6 },
+
+  scoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
   },
-  reasons: { gap: spacing.xs },
-  reason: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  scoreBlock: { alignItems: 'center' },
+  scoreDivider: { width: 1, height: 32, backgroundColor: colors.divider },
+  scoreFacts: { flex: 1, gap: 2 },
+
+  summaryBox: {
+    padding: spacing.sm,
+    borderRadius: radii.sm,
+    backgroundColor: colors.surfaceMuted,
+  },
+
+  reasonList: { gap: spacing.xs },
+  reasonRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  reasonText: { flex: 1 },
+
+  statusRow: { flexDirection: 'row' },
+
+  messageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    minHeight: 40,
+    borderRadius: radii.md,
+    backgroundColor: colors.primarySoft,
+  },
+  messageButtonPressed: { opacity: 0.7 },
 });

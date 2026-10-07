@@ -7,12 +7,11 @@ import { StyleSheet, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { AuthProvider } from '@/providers/auth-provider';
+import { AppProvider } from '@/providers/app-provider';
 import { colors } from '@/theme';
-import { seedDemoDataIfNeeded } from '@/lib/seed-demo-data';
 
 SplashScreen.preventAutoHideAsync().catch(() => {
   // Already hidden, or unavailable on this platform. Not worth surfacing.
@@ -21,22 +20,21 @@ SplashScreen.preventAutoHideAsync().catch(() => {
 /**
  * Root layout.
  *
- * Owns only global providers and the shared Stack. All navigation is handled by
- * `app/index.tsx`, which decides between the signed-out, student and landlord
- * areas once the session has been restored.
+ * Owns only global providers and the shared Stack. Route protection lives in
+ * `app/(app)/_layout.tsx`, and `app/index.tsx` is the single place that decides
+ * between the public, auth and app areas once the session has been restored.
  */
 export default function RootLayout() {
   useEffect(() => {
     void SplashScreen.hideAsync().catch(() => {
-      // Splash screen is not present on web; ignore.
+      // No splash screen on web; ignore.
     });
-    void seedDemoDataIfNeeded();
   }, []);
 
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
-        <AuthProvider>
+        <AppProvider>
           <View style={styles.root}>
             <StatusBar style="dark" />
             <Stack
@@ -49,7 +47,7 @@ export default function RootLayout() {
               <Stack.Screen name="index" options={{ animation: 'none' }} />
             </Stack>
           </View>
-        </AuthProvider>
+        </AppProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

@@ -18,7 +18,7 @@ import { Image } from 'expo-image';
 import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 
 import { colors, hitSlop, layout, radii, shadows, spacing, typography } from '@/theme';
-import type { IconName } from '@/constants/options';
+import type { IconName } from '@/lib/types';
 
 /* ------------------------------------------------------------------ */
 /* Text                                                                 */
@@ -106,7 +106,6 @@ export function ScreenScroll({
         ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
-        // eslint-disable-next-line react/no-unstable-nested-components
         {...(refreshControl ? { refreshControl } : {})}
       >
         {children}
@@ -539,9 +538,9 @@ export function Skeleton({ width, height, style }: { width?: number | string; he
   );
 }
 
-export function PropertyCardSkeleton() {
+export function RoomCardSkeleton() {
   return (
-    <View style={styles.skeletonCard} testID="property-card-skeleton">
+    <View style={styles.skeletonCard} testID="room-card-skeleton">
       <Skeleton height={180} style={{ borderTopLeftRadius: radii.lg, borderTopRightRadius: radii.lg }} />
       <View style={{ padding: spacing.lg, gap: spacing.sm }}>
         <Skeleton height={16} width="70%" />
@@ -555,8 +554,7 @@ export function PropertyCardSkeleton() {
 export function SkeletonList({ count = 3, renderItem }: { count?: number; renderItem: () => ReactNode }) {
   return (
     <View style={{ gap: spacing.lg }} testID="skeleton-list">
-      {Array.from({ length: count }).map((_, index) => (
-        // eslint-disable-next-line react/no-array-index-key
+      {Array.from({ length: count }, (_, index) => (
         <View key={index}>{renderItem()}</View>
       ))}
     </View>

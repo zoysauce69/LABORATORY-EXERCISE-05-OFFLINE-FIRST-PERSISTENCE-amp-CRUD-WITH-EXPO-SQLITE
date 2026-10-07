@@ -20,12 +20,7 @@
     },
     "android": {
       "package": "ph.roomlink.app",
-      "edgeToEdgeEnabled": true,
-      "permissions": [
-        "android.permission.POST_NOTIFICATIONS",
-        "android.permission.CAMERA",
-        "android.permission.READ_MEDIA_IMAGES"
-      ]
+      "edgeToEdgeEnabled": true
     },
     "web": {
       "bundler": "metro",
@@ -33,17 +28,11 @@
     },
     "plugins": [
       "expo-router",
+      "expo-sqlite",
       [
         "expo-image-picker",
         {
-          "photosPermission": "RoomLink uses your photos so you can attach property photos to your listings.",
-          "cameraPermission": "RoomLink uses your camera so you can photograph the properties you list."
-        }
-      ],
-      [
-        "expo-notifications",
-        {
-          "color": "#1D4ED8"
+          "photosPermission": "RoomLink needs access to your photos so you can add pictures to a room listing."
         }
       ]
     ],
