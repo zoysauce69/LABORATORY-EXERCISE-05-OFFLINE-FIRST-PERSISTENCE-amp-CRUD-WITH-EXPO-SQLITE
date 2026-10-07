@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
+import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
+import { SmartImage } from '@/components/image';
 import { DateField, SelectField, TextField } from '@/components/form-fields';
 import { ScreenHeader } from '@/components/screen-header';
 import { ChipGroup, AppText, Button, InlineAlert, Screen, ScreenScroll } from '@/components/ui';
@@ -10,9 +13,10 @@ import type { ChipOption } from '@/components/ui';
 import { PH_CITIES } from '@/constants/locations';
 import { useApp } from '@/hooks/use-app';
 import { toMessage } from '@/lib/errors';
+import { normalisePickedImage } from '@/lib/picked-image';
 import { ROOM_TYPE_OPTIONS } from '@/services/room-service';
 import { parsePesoInput } from '@/utils/format';
-import { colors, spacing } from '@/theme';
+import { colors, radii, spacing } from '@/theme';
 import type { Room, RoomType } from '@/lib/types';
 
 interface FormValues {
@@ -44,6 +48,9 @@ const LANDMARK_OPTIONS: ChipOption<string>[] = [
   { value: 'Church', label: 'Church' },
   { value: 'Park', label: 'Park' },
 ];
+
+/** Photos a single room may carry, kept low so storage stays predictable. */
+const MAX_PHOTOS = 3;
 
 /**
  * Add or edit a room as a normal full-screen form.
@@ -79,8 +86,10 @@ export default function AddRoomScreen() {
     description: existing?.description ?? '',
   }));
 
+  const [images, setImages] = useState<string[]>(() => existing?.images ?? []);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [photoNotice, setPhotoNotice] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -111,6 +120,43 @@ export default function AddRoomScreen() {
       delete next[key];
       return next;
     });
+  }
+
+  async function pickPhotos() {
+    if (images.length >= MAX_PHOTOS) return;
+    setPhotoNotice(null);
+
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        // Inline rather than Alert.alert, which does nothing on the web preview.
+        setPhotoNotice(
+          'Photo access is off. Allow it in your phone settings, then try adding a picture again.',
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        selectionLimit: MAX_PHOTOS - images.length,
+        quality: 0.7,
+      });
+
+      if (result.canceled) return;
+
+      const picked: string[] = [];
+      for (const asset of result.assets) {
+        picked.push(await normalisePickedImage(asset));
+      }
+      setImages((current) => [...new Set([...current, ...picked])].slice(0, MAX_PHOTOS));
+    } catch {
+      setPhotoNotice('We could not open your photo library. Please try again.');
+    }
+  }
+
+  function removePhoto(uri: string) {
+    setImages((current) => current.filter((item) => item !== uri));
   }
 
   function validate(): Record<string, string> {
@@ -163,7 +209,7 @@ export default function AddRoomScreen() {
         `${values.title.trim()} in ${values.barangay.trim()}, ${values.city}.`,
       amenities: existing?.amenities ?? [],
       houseRules: existing?.houseRules ?? [],
-      images: existing?.images ?? [],
+      images,
       landlord: existing?.landlord ?? {
         name: profile.fullName,
         verified: false,
@@ -199,7 +245,51 @@ export default function AddRoomScreen() {
 
       <ScreenScroll contentContainerStyle={styles.content}>
         {formError ? <InlineAlert tone="danger" message={formError} /> : null}
+        {photoNotice ? <InlineAlert tone="warning" message={photoNotice} /> : null}
         {savedMessage ? <InlineAlert tone="success" message={savedMessage} /> : null}
+
+        {/* Photos */}
+        <View style={styles.fieldBlock}>
+          <AppText variant="captionStrong">Photos</AppText>
+          <View style={styles.photoRow}>
+            {images.map((uri) => (
+              <View key={uri} style={styles.thumbWrap}>
+                <SmartImage
+                  uri={uri}
+                  style={styles.thumb}
+                  borderRadius={radii.md}
+                  accessibilityLabel="Room photo"
+                />
+                <Pressable
+                  onPress={() => removePhoto(uri)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove photo"
+                  style={({ pressed }) => [styles.thumbRemove, pressed && styles.pressed]}
+                >
+                  <Ionicons name="close" size={13} color={colors.white} />
+                </Pressable>
+              </View>
+            ))}
+
+            {images.length < MAX_PHOTOS ? (
+              <Pressable
+                onPress={() => void pickPhotos()}
+                accessibilityRole="button"
+                accessibilityLabel="Select image"
+                style={({ pressed }) => [styles.addPhoto, pressed && styles.pressed]}
+              >
+                <Ionicons name="camera-outline" size={20} color={colors.primary} />
+                <AppText variant="caption" color={colors.primary}>
+                  Select image
+                </AppText>
+              </Pressable>
+            ) : null}
+          </View>
+          <AppText variant="caption" color={colors.textMuted}>
+            Up to {MAX_PHOTOS} pictures. They are stored on this device with the room.
+          </AppText>
+        </View>
 
         <TextField
           label="Listing title"
@@ -309,4 +399,32 @@ export default function AddRoomScreen() {
 const styles = StyleSheet.create({
   content: { gap: spacing.md },
   actions: { gap: spacing.sm, marginTop: spacing.xs },
+  fieldBlock: { gap: spacing.sm },
+  photoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  thumbWrap: { position: 'relative' },
+  thumb: { width: 76, height: 76 },
+  thumbRemove: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 22,
+    height: 22,
+    borderRadius: radii.pill,
+    backgroundColor: colors.dark ?? '#0A192F',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addPhoto: {
+    width: 76,
+    height: 76,
+    borderRadius: radii.md,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    backgroundColor: colors.surfaceMuted,
+  },
+  pressed: { opacity: 0.7 },
 });

@@ -3,6 +3,7 @@ import { Modal, Pressable, StyleSheet, View } from 'react-native';
 
 import { useRouter } from 'expo-router';
 
+import { SmartImage } from '@/components/image';
 import { ScreenHeader } from '@/components/screen-header';
 import {
   AppText,
@@ -105,6 +106,20 @@ export default function ManageRoomsScreen() {
                 {room.description}
               </AppText>
 
+              {room.images.length > 0 ? (
+                <View style={styles.photoRow}>
+                  {room.images.slice(0, 3).map((uri) => (
+                    <SmartImage
+                      key={uri}
+                      uri={uri}
+                      style={styles.thumb}
+                      borderRadius={radii.sm}
+                      accessibilityLabel={`${room.title} photo`}
+                    />
+                  ))}
+                </View>
+              ) : null}
+
               <View style={styles.slotRow}>
                 <Badge
                   label={`${room.availableSlots} slot${room.availableSlots === 1 ? '' : 's'} open`}
@@ -203,6 +218,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   cardTitleBlock: { flex: 1, gap: 2 },
+  photoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  thumb: { width: 64, height: 64 },
   slotRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
   actionButton: { flex: 1 },

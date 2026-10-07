@@ -2,13 +2,25 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 
 import { DateField, SegmentedControl, SelectField, SwitchField, TextField } from '@/components/form-fields';
 import { ScreenHeader } from '@/components/screen-header';
-import { AppText, Button, Card, ChipGroup, Divider, InlineAlert, Screen, ScreenScroll } from '@/components/ui';
+import {
+  AppText,
+  Avatar,
+  Button,
+  Card,
+  ChipGroup,
+  Divider,
+  InlineAlert,
+  Screen,
+  ScreenScroll,
+} from '@/components/ui';
 import { useApp } from '@/hooks/use-app';
 import { toMessage } from '@/lib/errors';
+import { normalisePickedImage } from '@/lib/picked-image';
 import { INTERESTS } from '@/lib/mock-data';
 import { cities } from '@/constants/locations';
 import {
@@ -60,8 +72,10 @@ export default function EditProfileScreen() {
   }));
 
   const [lifestyle, setLifestyle] = useState<Lifestyle>(profile.lifestyle);
+  const [avatar, setAvatar] = useState<string | null>(profile.avatarUrl);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [photoNotice, setPhotoNotice] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDiscarding, setIsDiscarding] = useState(false);
 
@@ -78,6 +92,59 @@ export default function EditProfileScreen() {
       // Roll back so the controls never claim something storage rejected.
       setLifestyle(lifestyle);
       setFormError(toMessage(result.error, 'We could not save that change.'));
+    }
+  }
+
+  /**
+   * Profile pictures persist on the spot, like lifestyle answers — there is
+   * nothing else to submit, and a photo the user just picked should not be
+   * lost because they scrolled past Save.
+   */
+  async function pickAvatar() {
+    setPhotoNotice(null);
+
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        // Inline rather than Alert.alert, which does nothing on the web preview.
+        setPhotoNotice(
+          'Photo access is off. Allow it in your phone settings, then try adding a picture again.',
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: false,
+        quality: 0.7,
+      });
+
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      if (!asset) return;
+
+      const uri = await normalisePickedImage(asset);
+      setAvatar(uri);
+
+      const saved = await updateProfile({ avatarUrl: uri });
+      if (!saved.ok) {
+        // Roll back so the preview never claims something storage rejected.
+        setAvatar(profile.avatarUrl);
+        setPhotoNotice(toMessage(saved.error, 'We could not save that picture.'));
+      }
+    } catch {
+      setPhotoNotice('We could not open your photo library. Please try again.');
+    }
+  }
+
+  async function clearAvatar() {
+    setPhotoNotice(null);
+    setAvatar(null);
+
+    const saved = await updateProfile({ avatarUrl: null });
+    if (!saved.ok) {
+      setAvatar(profile.avatarUrl);
+      setPhotoNotice(toMessage(saved.error, 'We could not remove that picture.'));
     }
   }
 
@@ -172,6 +239,37 @@ export default function EditProfileScreen() {
             This number moves as you change the answers below.
           </AppText>
         </Card>
+
+        {/* ── Profile photo ──────────────────────────────────────── */}
+        <Section
+          title="Profile photo"
+          hint="Shown on your profile and on every card with your name on it."
+        >
+          <View style={styles.photoRow}>
+            <Avatar uri={avatar} name={values.fullName} size={76} />
+            <View style={styles.photoActions}>
+              <Button
+                label="Select image"
+                variant="outline"
+                size="sm"
+                icon="camera-outline"
+                onPress={() => void pickAvatar()}
+                accessibilityLabel="Select profile picture"
+              />
+              {avatar ? (
+                <Button
+                  label="Remove photo"
+                  variant="ghost"
+                  size="sm"
+                  icon="trash-outline"
+                  onPress={() => void clearAvatar()}
+                  accessibilityLabel="Remove profile picture"
+                />
+              ) : null}
+            </View>
+          </View>
+          {photoNotice ? <InlineAlert tone="warning" message={photoNotice} /> : null}
+        </Section>
 
         {/* ── About you ────────────────────────────────────────── */}
         <Section title="About you">
@@ -408,8 +506,8 @@ export default function EditProfileScreen() {
         </View>
 
         <AppText variant="caption" align="center">
-          Lifestyle and interest changes save immediately. Name, contact and search fields need
-          Save.
+          Profile photo, lifestyle and interest changes save immediately. Name, contact and search
+          fields need Save.
         </AppText>
       </ScreenScroll>
     </Screen>
@@ -453,6 +551,9 @@ const styles = StyleSheet.create({
   sectionBody: { gap: spacing.lg, paddingTop: spacing.xs },
   pair: { flexDirection: 'row', gap: spacing.md },
   pairField: { flex: 1 },
+
+  photoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  photoActions: { flex: 1, gap: spacing.sm },
 
   actions: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   actionPrimary: { flex: 1 },

@@ -28,7 +28,13 @@
     },
     "plugins": [
       "expo-router",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "RoomLink needs your photos so you can add pictures to your rooms and profile."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false
